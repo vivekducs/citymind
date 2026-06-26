@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { toast, Toaster } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
+import { apiFetch } from '../api';
 
 interface Comment {
   comment_id: string;
@@ -172,7 +173,7 @@ export default function IssueDetail() {
     } : null);
 
     try {
-      const response = await fetch(`/api/issues/${issueId}/verify`, {
+      const response = await apiFetch(`/api/issues/${issueId}/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.user_id, vote: voteType })
@@ -229,7 +230,7 @@ export default function IssueDetail() {
     setNewComment('');
 
     try {
-      const response = await fetch(`/api/issues/${issueId}/comments`, {
+      const response = await apiFetch(`/api/issues/${issueId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -265,7 +266,7 @@ export default function IssueDetail() {
     setComments(prev => prev.map(c => c.comment_id === commentId ? { ...c, upvotes: c.upvotes + 1 } : c));
 
     try {
-      const response = await fetch(`/api/issues/${issueId}/comments/${commentId}/upvote`, {
+      const response = await apiFetch(`/api/issues/${issueId}/comments/${commentId}/upvote`, {
         method: 'POST'
       });
       if (!response.ok) {
@@ -726,7 +727,7 @@ export default function IssueDetail() {
               <button
                 onClick={async () => {
                   try {
-                    const res = await fetch('/api/agent/escalation', { method: 'POST' });
+                    const res = await apiFetch('/api/agent/escalation', { method: 'POST' });
                     if (res.ok) {
                       toast.success("🤖 Agents Daemon Triggered: Checked consensus, promoted escalation states!");
                     } else {

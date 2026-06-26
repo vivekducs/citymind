@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
 import { doc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useIssueStore } from '../store';
 import { db, storage } from '../firebaseConfig';
 import { Issue, LatLng } from '../types';
+import { apiFetch } from '../api';
 import { 
   AlertTriangle, 
   MapPin, 
@@ -222,7 +223,7 @@ export default function Report() {
     setAiSuggestions(prev => ({ ...prev, loading: true }));
 
     try {
-      const response = await fetch('/api/gemini/insights', {
+      const response = await apiFetch('/api/gemini/insights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: watchedTitle, description: watchedDescription || "No detailed description provided." })
@@ -359,7 +360,7 @@ export default function Report() {
       const departmentName = CIVIC_CATEGORIES.find(c => c.name === data.category)?.department || 'General Administration';
 
       // 2. Post to backend
-      const response = await fetch('/api/issues', {
+      const response = await apiFetch('/api/issues', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

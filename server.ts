@@ -1935,6 +1935,258 @@ async function bootstrap() {
   });
 
 
+  // --- PHASE 4: ADMIN ENDPOINTS ---
+  app.get('/api/admin/dashboard', async (req, res) => {
+    try {
+      const issuesCol = collection(db, 'issues');
+      const qSnapshot = await getDocs(issuesCol);
+      let total_assigned = 0;
+      let in_progress_count = 0;
+      let resolved_count = 0;
+      let totalResolutionTimeMs = 0;
+
+      qSnapshot.forEach((docSnap) => {
+        const issue = docSnap.data();
+        total_assigned++;
+        if (['In Progress', 'investigating', 'resolving', 'Assigned'].includes(issue.status)) {
+          in_progress_count++;
+        }
+        if (issue.status === 'resolved') {
+          resolved_count++;
+          let resTime = issue.resolved_at ? new Date(issue.resolved_at).getTime() - new Date(issue.created_at).getTime() : 24 * 3600 * 1000;
+          totalResolutionTimeMs += resTime;
+        }
+      });
+
+      const avg_resolution_days = resolved_count > 0 ? (totalResolutionTimeMs / resolved_count) / (24 * 3600000) : 0;
+      
+      res.json({
+        total_assigned,
+        in_progress_count,
+        resolved_count,
+        avg_resolution_days: parseFloat(avg_resolution_days.toFixed(1)),
+        rating: 4.8
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/admin/issues', async (req, res) => {
+    try {
+      const { status, priority, limit = 20, offset = 0 } = req.query;
+      const issuesCol = collection(db, 'issues');
+      const qSnapshot = await getDocs(issuesCol);
+      let issues: any[] = [];
+      qSnapshot.forEach((docSnap) => issues.push(docSnap.data()));
+
+      if (status && status !== 'all') {
+        issues = issues.filter(i => i.status.toLowerCase() === (status as string).toLowerCase());
+      }
+      if (priority && priority !== 'all') {
+        issues = issues.filter(i => (i.severity || 'low').toLowerCase() === (priority as string).toLowerCase());
+      }
+
+      issues.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const start = parseInt(offset as string) || 0;
+      res.json(issues.slice(start, start + parseInt(limit as string)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/admin/issues/:issueId', async (req, res) => {
+    try {
+      const docSnap = await getDoc(doc(db, 'issues', req.params.issueId));
+      if (!docSnap.exists()) return res.status(404).json({ error: "Not found" });
+      res.json(docSnap.data());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/admin/issues/:issueId/assign', async (req, res) => {
+    try {
+      const issueId = req.params.issueId;
+      const issueRef = doc(db, 'issues', issueId);
+      await updateDoc(issueRef, {
+        assigned_to_person: req.body.assigned_to_person_id,
+        status: "Assigned",
+        assigned_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+      
+      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', notifId), {
+        notification_id: notifId,
+        issue_id: issueId,
+        message: "Your issue is now assigned to a staff member.",
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+      res.json({ success: true, message: "Assigned" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/admin/issues/:issueId', async (req, res) => {
+    try {
+      const issueId = req.params.issueId;
+      const { status, progress_note } = req.body;
+      const issueRef = doc(db, 'issues', issueId);
+      const updates: any = { status, updated_at: new Date().toISOString() };
+      if (status === 'Resolved' || status === 'resolved') {
+        updates.resolved_at = new Date().toISOString();
+      }
+      await updateDoc(issueRef, updates);
+      
+      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', notifId), {
+        notification_id: notifId,
+        issue_id: issueId,
+        message: "Your issue status is now: " + status,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+      res.json({ success: true, updates });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/issues/:issueId/progress-update', async (req, res) => {
+    try {
+      const noteId = 'note_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'admin_notes', noteId), {
+        note_id: noteId,
+        issue_id: req.params.issueId,
+        text: req.body.note,
+        created_at: new Date().toISOString()
+      });
+      res.json({ success: true, note_id: noteId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/issues/:issueId/upload-photo', async (req, res) => {
+    try {
+      const issueRef = doc(db, 'issues', req.params.issueId);
+      const issueSnap = await getDoc(issueRef);
+      const data = issueSnap.data() || {};
+      const photos = data.before_after_photos || [];
+      photos.push(req.body.url);
+      await updateDoc(issueRef, { before_after_photos: photos });
+      res.json({ success: true, url: req.body.url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PHASE 4: GAMIFICATION ENDPOINTS ---
+  app.post('/api/gamification/award-badge', async (req, res) => {
+    try {
+      const { user_id, type } = req.body;
+      const badgeId = 'badge_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'badges', badgeId), {
+        badge_id: badgeId,
+        user_id,
+        badge_type: type,
+        earned_at: new Date().toISOString()
+      });
+      const userRef = doc(db, 'users', user_id);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const badges = userSnap.data().badges_earned || [];
+        if (!badges.includes(type)) {
+          badges.push(type);
+          await updateDoc(userRef, { badges_earned: badges });
+        }
+      }
+      res.json({ success: true, badge_id: badgeId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/gamification/leaderboard', async (req, res) => {
+    try {
+      const { type, zone, limit = 20 } = req.query;
+      const usersCol = collection(db, 'users');
+      const qSnapshot = await getDocs(usersCol);
+      let users: any[] = [];
+      qSnapshot.forEach((docSnap) => users.push(docSnap.data()));
+
+      if (zone && zone !== 'All zones') {
+        users = users.filter(u => u.zone === zone);
+      }
+
+      users.sort((a, b) => (b.total_issues_reported || 0) - (a.total_issues_reported || 0));
+      const entries = users.slice(0, parseInt(limit as string)).map((u, idx) => ({
+        rank: idx + 1,
+        user_id: u.user_id,
+        username: u.name,
+        score: u.total_issues_reported || 0,
+        verifications: 0,
+        badge_icon: u.badges_earned?.[0] || 'User',
+        zone: u.zone || 'Zone A'
+      }));
+
+      res.json(entries);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/gamification/user-points/:userId', async (req, res) => {
+    try {
+      const userSnap = await getDoc(doc(db, 'users', req.params.userId));
+      if (!userSnap.exists()) return res.status(404).json({ error: "Not found" });
+      const user = userSnap.data();
+      const issues = user.total_issues_reported || 0;
+      const verifications = user.total_verifications || Math.floor(Math.random() * 50); // MOCKED
+      const resolutions = user.total_resolutions || Math.floor(Math.random() * 5); // MOCKED
+      const total_points = (issues * 5) + (verifications * 1) + (resolutions * 10);
+      
+      res.json({
+        total_points,
+        breakdown: { issues: issues * 5, verifications: verifications * 1, resolutions: resolutions * 10 }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/agent/leaderboard', async (req, res) => {
+    try {
+      const usersCol = collection(db, 'users');
+      const qSnapshot = await getDocs(usersCol);
+      let users: any[] = [];
+      qSnapshot.forEach((docSnap) => users.push(docSnap.data()));
+      
+      users.sort((a, b) => (b.total_issues_reported || 0) - (a.total_issues_reported || 0));
+      const entries = users.slice(0, 20).map((u, idx) => ({
+        rank: idx + 1,
+        user_id: u.user_id,
+        username: u.name,
+        score: u.total_issues_reported || 0,
+        zone: u.zone || "Zone A"
+      }));
+
+      const leaderboardId = 'lb_monthly_reporters_2024_06';
+      await setDoc(doc(db, 'leaderboards', leaderboardId), {
+        type: "monthly_reporters",
+        period: "2024-06",
+        entries,
+        last_updated: new Date().toISOString()
+      });
+      res.json({ success: true, message: "Aggregated" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Integrate Vite dev server middleware in development
   if (!isProduction) {
     const vite = await createViteServer({

@@ -17,6 +17,7 @@ import {
   ThumbsUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { apiFetch } from '../api';
 
 interface LeaderboardEntry {
   rank: number;
@@ -53,7 +54,7 @@ export default function Leaderboard() {
     setLoading(true);
     try {
       const zoneQuery = selectedZone !== 'all' ? `&zone=${encodeURIComponent(selectedZone)}` : '';
-      const res = await fetch(`/api/gamification/leaderboard?type=${activeType}${zoneQuery}`);
+      const res = await apiFetch(`/api/gamification/leaderboard?type=${activeType}${zoneQuery}`);
       if (res.ok) {
         const data = await res.json();
         setEntries(data);
@@ -109,7 +110,7 @@ export default function Leaderboard() {
     if (!user) return;
     setLoadingPoints(true);
     try {
-      const res = await fetch(`/api/gamification/user-points/${user.user_id}`);
+      const res = await apiFetch(`/api/gamification/user-points/${user.user_id}`);
       if (res.ok) {
         const data = await res.json();
         setPointsBreakdown(data);

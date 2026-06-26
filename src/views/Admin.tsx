@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
+import { apiFetch } from '../api';
 
 interface StaffMember {
   id: string;
@@ -260,7 +261,7 @@ export default function Admin() {
   const handleStatusChange = async (nextStatus: 'investigating' | 'resolving' | 'resolved') => {
     if (!selectedIssue) return;
     try {
-      const res = await fetch(`/api/admin/issues/${selectedIssue.issue_id}`, {
+      const res = await apiFetch(`/api/admin/issues/${selectedIssue.issue_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus, progress_note: progressNote })
@@ -290,7 +291,7 @@ export default function Admin() {
   const handleAssignStaff = async (staffId: string) => {
     if (!selectedIssue || !staffId) return;
     try {
-      const res = await fetch(`/api/admin/issues/${selectedIssue.issue_id}/assign`, {
+      const res = await apiFetch(`/api/admin/issues/${selectedIssue.issue_id}/assign`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assigned_to_person_id: staffId })
@@ -319,7 +320,7 @@ export default function Admin() {
     e.preventDefault();
     if (!selectedIssue || !progressNote.trim()) return;
     try {
-      const res = await fetch(`/api/admin/issues/${selectedIssue.issue_id}/progress-update`, {
+      const res = await apiFetch(`/api/admin/issues/${selectedIssue.issue_id}/progress-update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: progressNote })
@@ -347,7 +348,7 @@ export default function Admin() {
     if (!selectedIssue) return;
     setUploadingPhoto(true);
     try {
-      const res = await fetch(`/api/admin/issues/${selectedIssue.issue_id}/upload-photo`, {
+      const res = await apiFetch(`/api/admin/issues/${selectedIssue.issue_id}/upload-photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ photoUrl })

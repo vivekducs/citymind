@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { apiFetch } from '../api';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -31,7 +32,7 @@ export default function Dashboard() {
 
   const fetchInsights = async () => {
     try {
-      const response = await fetch('/api/dashboard/insights');
+      const response = await apiFetch('/api/dashboard/insights');
       if (response.ok) {
         const data = await response.json();
         setInsights(data);
@@ -94,7 +95,7 @@ export default function Dashboard() {
   const handleTriggerAnalysis = async () => {
     setTriggeringAnalysis(true);
     try {
-      const response = await fetch('/api/agent/insights', { method: 'POST' });
+      const response = await apiFetch('/api/agent/insights', { method: 'POST' });
       if (response.ok) {
         await fetchInsights();
       }
