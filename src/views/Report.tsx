@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, ChangeEvent } from 'react';
+import { useState, useEffect, useRef, ChangeEvent, MouseEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, Link } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
@@ -120,9 +120,38 @@ export default function Report() {
   // Image handling options
   const [imageOption, setImageOption] = useState<'preset' | 'upload' | 'camera'>('preset');
   const [selectedPreset, setSelectedPreset] = useState(IMAGE_PRESETS[0].url);
-  const [customFile, setCustomFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string>('');
+  
+  // Independent state variables for device uploads and camera captures
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string>('');
+  
+  const [capturedFile, setCapturedFile] = useState<File | null>(null);
+  const [capturedPreviewUrl, setCapturedPreviewUrl] = useState<string>('');
+
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
+  // References for unmount cleanup
+  const uploadedUrlRef = useRef<string>('');
+  const capturedUrlRef = useRef<string>('');
+
+  useEffect(() => {
+    uploadedUrlRef.current = uploadedPreviewUrl;
+  }, [uploadedPreviewUrl]);
+
+  useEffect(() => {
+    capturedUrlRef.current = capturedPreviewUrl;
+  }, [capturedPreviewUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (uploadedUrlRef.current) {
+        URL.revokeObjectURL(uploadedUrlRef.current);
+      }
+      if (capturedUrlRef.current) {
+        URL.revokeObjectURL(capturedUrlRef.current);
+      }
+    };
+  }, []);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -334,13 +363,54 @@ export default function Report() {
     }
   };
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleUploadFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      setCustomFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
-      toast.success("Image selected!");
+      setUploadedFile(file);
+      if (uploadedPreviewUrl) {
+        URL.revokeObjectURL(uploadedPreviewUrl);
+      }
+      setUploadedPreviewUrl(URL.createObjectURL(file));
+      toast.success("Device image selected!");
     }
+  };
+
+  const handleCameraFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setCapturedFile(file);
+      if (capturedPreviewUrl) {
+        URL.revokeObjectURL(capturedPreviewUrl);
+      }
+      setCapturedPreviewUrl(URL.createObjectURL(file));
+      toast.success("Camera photo captured!");
+    }
+  };
+
+  const clearUploadedFile = (e: MouseEvent) => {
+    e.stopPropagation();
+    setUploadedFile(null);
+    if (uploadedPreviewUrl) {
+      URL.revokeObjectURL(uploadedPreviewUrl);
+      setUploadedPreviewUrl('');
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    toast.success("Uploaded image cleared");
+  };
+
+  const clearCapturedFile = (e: MouseEvent) => {
+    e.stopPropagation();
+    setCapturedFile(null);
+    if (capturedPreviewUrl) {
+      URL.revokeObjectURL(capturedPreviewUrl);
+      setCapturedPreviewUrl('');
+    }
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = '';
+    }
+    toast.success("Captured photo cleared");
   };
 
   const uploadToStorage = async (file: File | Blob | string, issueId: string): Promise<string> => {
@@ -486,9 +556,16 @@ export default function Report() {
 
     try {
       // 1. Upload custom image if chosen
-      if ((imageOption === 'upload' || imageOption === 'camera') && customFile) {
+      const fileToUpload = imageOption === 'upload' ? uploadedFile : (imageOption === 'camera' ? capturedFile : null);
+      
+      if (imageOption !== 'preset') {
+        if (!fileToUpload) {
+          toast.error(imageOption === 'upload' ? "Please select an image file to upload." : "Please capture a photo using your camera.");
+          setIsSubmitting(false);
+          return;
+        }
         toast.loading("Uploading proof image to Cloud Storage...", { id: 'upload-toast' });
-        finalImageUrl = await uploadToStorage(customFile, issue_id);
+        finalImageUrl = await uploadToStorage(fileToUpload, issue_id);
         toast.success("Image uploaded successfully!", { id: 'upload-toast' });
       }
 
@@ -758,18 +835,27 @@ export default function Report() {
               {imageOption === 'upload' && (
                 <div 
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:border-navy cursor-pointer transition-colors space-y-2 bg-slate-50/50"
+                  className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:border-navy cursor-pointer transition-colors space-y-2 bg-slate-50/50 relative"
                 >
                   <input
                     type="file"
                     ref={fileInputRef}
                     accept="image/*"
-                    onChange={handleFileChange}
+                    onChange={handleUploadFileChange}
                     className="hidden"
                   />
-                  {previewUrl ? (
-                    <div className="max-w-xs mx-auto aspect-video rounded-xl overflow-hidden border border-slate-100">
-                      <img src={previewUrl} alt="Device Preview" className="w-full h-full object-cover" />
+                  {uploadedPreviewUrl ? (
+                    <div className="relative max-w-xs mx-auto aspect-video rounded-xl overflow-hidden border border-slate-150 group">
+                      <img src={uploadedPreviewUrl} alt="Device Preview" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                        <button
+                          type="button"
+                          onClick={clearUploadedFile}
+                          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-[10px] rounded-lg shadow-md transition-colors uppercase tracking-wider cursor-pointer"
+                        >
+                          Remove Photo
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-1">
@@ -784,19 +870,28 @@ export default function Report() {
               {imageOption === 'camera' && (
                 <div 
                   onClick={() => cameraInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:border-navy cursor-pointer transition-colors space-y-2 bg-slate-50/50"
+                  className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:border-navy cursor-pointer transition-colors space-y-2 bg-slate-50/50 relative"
                 >
                   <input
                     type="file"
                     ref={cameraInputRef}
                     capture="environment"
                     accept="image/*"
-                    onChange={handleFileChange}
+                    onChange={handleCameraFileChange}
                     className="hidden"
                   />
-                  {previewUrl ? (
-                    <div className="max-w-xs mx-auto aspect-video rounded-xl overflow-hidden border border-slate-100">
-                      <img src={previewUrl} alt="Camera Preview" className="w-full h-full object-cover" />
+                  {capturedPreviewUrl ? (
+                    <div className="relative max-w-xs mx-auto aspect-video rounded-xl overflow-hidden border border-slate-150 group">
+                      <img src={capturedPreviewUrl} alt="Camera Preview" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                        <button
+                          type="button"
+                          onClick={clearCapturedFile}
+                          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-[10px] rounded-lg shadow-md transition-colors uppercase tracking-wider cursor-pointer"
+                        >
+                          Remove Photo
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-1">
