@@ -3,11 +3,10 @@ import { useForm } from 'react-hook-form';
 import { useNavigate, Link } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
 import { doc, setDoc, updateDoc, increment } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import imageCompression from 'browser-image-compression';
 import { useAuth } from '../context/AuthContext';
 import { useIssueStore } from '../store';
-import { db, storage } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
 import { Issue, LatLng } from '../types';
 import { apiFetch } from '../api';
 import { openDB } from 'idb';
@@ -173,6 +172,7 @@ export default function Report() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const hasAutoDetected = useRef(false);
 
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm({
     defaultValues: {
@@ -191,9 +191,16 @@ export default function Report() {
   const watchedDescription = watch('description');
 
   // Trigger GPS auto-detect
-  const handleGPSDetect = () => {
+  const handleGPSDetect = (isInitial: boolean = false) => {
+    if (isInitial) {
+      if (hasAutoDetected.current) return;
+      hasAutoDetected.current = true;
+    }
+
     if (!navigator.geolocation) {
-      toast.error("Geolocation is not supported by your browser.");
+      if (!isInitial) {
+        toast.error("Geolocation is not supported by your browser.");
+      }
       return;
     }
 
@@ -213,7 +220,9 @@ export default function Report() {
       },
       (error) => {
         console.error("GPS error:", error);
-        toast.error("Could not obtain GPS permission or accuracy.");
+        if (!isInitial) {
+          toast.error("Could not obtain GPS permission or accuracy.");
+        }
         setGpsLoading(false);
       },
       { enableHighAccuracy: true, timeout: 8000 }
@@ -222,7 +231,7 @@ export default function Report() {
 
   // Run GPS auto detect on initial mount
   useEffect(() => {
-    handleGPSDetect();
+    handleGPSDetect(true);
 
     // Setup offline draft sync
     const syncOfflineDrafts = async () => {
@@ -414,126 +423,70 @@ export default function Report() {
   };
 
   const uploadToStorage = async (file: File | Blob | string, issueId: string): Promise<string> => {
-    const convertToBase64AndResolve = async (blob: Blob): Promise<string> => {
-      try {
-        const base64Str = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = (err) => reject(err);
-          reader.readAsDataURL(blob);
-        });
-        toast.success("Image optimized for cloud submission!", { id: 'upload-toast' });
-        return base64Str;
-      } catch (err) {
-        throw new Error("Failed to encode image to base64.");
+    try {
+      let fileToUpload: File | Blob;
+      
+      // Handle native paths or string URIs
+      if (typeof file === 'string') {
+        const res = await fetch(file);
+        fileToUpload = await res.blob();
+      } else {
+        fileToUpload = file;
       }
-    };
 
-    return new Promise(async (resolve, reject) => {
-      const timeoutTime = 45000; // 45 seconds timeout
-      const timeoutId = setTimeout(async () => {
-        try {
-          console.warn("Upload timed out, falling back to local encoding");
-          let fileToUpload: File | Blob;
-          if (typeof file === 'string') {
-            const res = await fetch(file);
-            fileToUpload = await res.blob();
-          } else {
-            fileToUpload = file;
-          }
-          const base64Str = await convertToBase64AndResolve(fileToUpload);
-          resolve(base64Str);
-        } catch (e) {
-          reject(new Error("Upload timed out and fallback encoding failed."));
-        }
-      }, timeoutTime);
-
+      toast.loading("Compressing image for submission...", { id: 'upload-toast' });
+      setUploadProgress(15);
+      
+      // Compress image client-side before upload
+      const options = {
+        maxSizeMB: 0.1, // Target small size (100KB)
+        maxWidthOrHeight: 800,
+        useWebWorker: true,
+        initialQuality: 0.6
+      };
+      
+      let compressedFile: Blob;
       try {
-        let fileToUpload: File | Blob;
-        
-        // Fix for Native path/URIs often provided by web views or native cameras
-        if (typeof file === 'string') {
-          const res = await fetch(file);
-          fileToUpload = await res.blob();
-        } else {
-          fileToUpload = file;
-        }
-
-        toast.loading("Compressing image to save bandwidth...", { id: 'upload-toast' });
-        
-        // Compress image client-side before upload
-        const options = {
-          maxSizeMB: 0.15, // Target smaller size for safer base64 and fast upload
-          maxWidthOrHeight: 1024,
-          useWebWorker: true,
-          initialQuality: 0.7
-        };
-        
-        let compressedFile: Blob;
-        try {
-          compressedFile = await imageCompression(fileToUpload as File, options);
-        } catch (compErr) {
-          console.warn("Image compression failed, using original file:", compErr);
-          compressedFile = fileToUpload;
-        }
-
-        toast.loading("Uploading image to Cloud Storage...", { id: 'upload-toast' });
-        
-        const filename = (compressedFile as File).name || 'upload.jpg';
-        const storageRef = ref(storage, `issues/${issueId}/${Date.now()}_${filename}`);
-        const uploadTask = uploadBytesResumable(storageRef, compressedFile);
-
-        uploadTask.on('state_changed', 
-          (snapshot) => {
-            const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-            setUploadProgress(progress);
-          }, 
-          async (error) => {
-            clearTimeout(timeoutId);
-            console.warn("Storage upload failed, using secure base64 fallback:", error);
-            try {
-              const base64Str = await convertToBase64AndResolve(compressedFile);
-              resolve(base64Str);
-            } catch (fbErr: any) {
-              reject(new Error(`Upload failed: ${error.message} (Fallback failed: ${fbErr.message})`));
-            }
-          }, 
-          async () => {
-            try {
-              const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-              clearTimeout(timeoutId);
-              resolve(downloadUrl);
-            } catch (err: any) {
-              console.warn("Failed to get download URL, using secure base64 fallback:", err);
-              try {
-                const base64Str = await convertToBase64AndResolve(compressedFile);
-                clearTimeout(timeoutId);
-                resolve(base64Str);
-              } catch (fbErr: any) {
-                clearTimeout(timeoutId);
-                reject(new Error(`Failed to verify upload: ${err.message} (Fallback failed: ${fbErr.message})`));
-              }
-            }
-          }
-        );
-      } catch (err: any) {
-        clearTimeout(timeoutId);
-        console.warn("Image processing error, using secure base64 fallback:", err);
-        try {
-          let fileToUpload: File | Blob;
-          if (typeof file === 'string') {
-            const res = await fetch(file);
-            fileToUpload = await res.blob();
-          } else {
-            fileToUpload = file;
-          }
-          const base64Str = await convertToBase64AndResolve(fileToUpload);
-          resolve(base64Str);
-        } catch (fbErr: any) {
-          reject(new Error(`Failed to process image: ${err.message} (Fallback failed: ${fbErr.message})`));
-        }
+        compressedFile = await imageCompression(fileToUpload as File, options);
+      } catch (compErr) {
+        console.warn("Image compression failed, using original file:", compErr);
+        compressedFile = fileToUpload;
       }
-    });
+
+      setUploadProgress(45);
+      toast.loading("Uploading image to secure server...", { id: 'upload-toast' });
+
+      // Convert to base64
+      const base64Str = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = (err) => reject(err);
+        reader.readAsDataURL(compressedFile);
+      });
+
+      setUploadProgress(75);
+
+      // Post to local server upload endpoint
+      const uploadResponse = await apiFetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Str })
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error("Local server upload failed");
+      }
+
+      const uploadResult = await uploadResponse.json();
+      setUploadProgress(100);
+      toast.success("Image uploaded successfully!", { id: 'upload-toast' });
+      
+      return uploadResult.url;
+    } catch (err: any) {
+      console.error("Upload process failed:", err);
+      toast.error("Upload failed: " + err.message, { id: 'upload-toast' });
+      throw err;
+    }
   };
 
   const onSubmit = async (data: any) => {

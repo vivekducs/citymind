@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ReactNode } from 'react';
+import React, { useState, useEffect, ReactNode, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -19,11 +19,32 @@ import {
   Sun,
   Settings,
   Leaf,
-  Clock
+  Clock,
+  Check,
+  MessageSquare,
+  Combine,
+  Construction,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
-import { messaging } from '../firebaseConfig';
+import { messaging, db } from '../firebaseConfig';
 import { getToken, onMessage } from 'firebase/messaging';
-import { toast } from 'react-hot-toast';
+import { 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot, 
+  doc, 
+  updateDoc, 
+  writeBatch,
+  addDoc,
+  setDoc
+} from 'firebase/firestore';
+import { Notification } from '../types';
+import { motion, AnimatePresence } from 'motion/react';
+import { toast, Toaster } from 'react-hot-toast';
+
 
 interface LayoutProps {
   children: ReactNode;
@@ -100,6 +121,165 @@ export default function Layout({ children }: LayoutProps) {
     if (saved) return saved === 'dark';
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: any) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowNotifDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Set up Firebase notifications subscription with index-safe fallback
+  useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'notifications'),
+      where('user_id', 'in', [user.user_id, 'anonymous', 'all']),
+      orderBy('created_at', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Notification[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          notification_id: data.notification_id || doc.id,
+          issue_id: data.issue_id || '',
+          user_id: data.user_id || '',
+          message: data.message || '',
+          is_read: data.is_read || false,
+          created_at: data.created_at || new Date().toISOString()
+        });
+      });
+      setNotifications(list);
+    }, (err) => {
+      console.warn("Failed to load notifications with sorted query, falling back...", err);
+      // Fallback: If query fails due to missing index, run it without orderBy
+      const fallbackQuery = query(
+        collection(db, 'notifications'),
+        where('user_id', 'in', [user.user_id, 'anonymous', 'all'])
+      );
+      return onSnapshot(fallbackQuery, (snapshot) => {
+        const list: Notification[] = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          list.push({
+            notification_id: data.notification_id || doc.id,
+            issue_id: data.issue_id || '',
+            user_id: data.user_id || '',
+            message: data.message || '',
+            is_read: data.is_read || false,
+            created_at: data.created_at || new Date().toISOString()
+          });
+        });
+        // Sort manually client side
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setNotifications(list);
+      });
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleMarkAsRead = async (id: string) => {
+    try {
+      const notifRef = doc(db, 'notifications', id);
+      await updateDoc(notifRef, { is_read: true });
+    } catch (err) {
+      console.error("Failed to mark notification as read:", err);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      const unreadNotifs = notifications.filter(n => !n.is_read);
+      if (unreadNotifs.length === 0) return;
+
+      const batch = writeBatch(db);
+      unreadNotifs.forEach(notif => {
+        const notifRef = doc(db, 'notifications', notif.notification_id);
+        batch.update(notifRef, { is_read: true });
+      });
+      await batch.commit();
+      toast.success("All notifications marked as read!");
+    } catch (err) {
+      console.error("Failed to mark all notifications as read:", err);
+      toast.error("Failed to mark all as read");
+    }
+  };
+
+  const handleNotificationClick = async (notif: Notification) => {
+    if (!notif.is_read) {
+      await handleMarkAsRead(notif.notification_id);
+    }
+    setShowNotifDropdown(false);
+    if (notif.issue_id) {
+      navigate(`/issues/${notif.issue_id}`);
+    }
+  };
+
+  const triggerTestAlert = async () => {
+    if (!user) {
+      toast.error("Please log in first to receive notifications");
+      return;
+    }
+    try {
+      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      const testNotifs = [
+        `Gemini Dispatcher auto-assigned reported leakage to Department of Water Supply.`,
+        `Your reported pothole status changed to RESOLVED. Visual proof uploaded!`,
+        `A neighbor verified and upvoted your civic report on broken streetlights.`,
+        `New community discussion on your reported garbage dump.`
+      ];
+      const randomMsg = testNotifs[Math.floor(Math.random() * testNotifs.length)];
+      
+      const newNotif = {
+        notification_id: notifId,
+        issue_id: 'sample_issue',
+        user_id: user.user_id,
+        message: randomMsg,
+        is_read: false,
+        created_at: new Date().toISOString()
+      };
+      
+      const docRef = doc(db, 'notifications', notifId);
+      await setDoc(docRef, newNotif);
+      toast.success("Simulated civic alert triggered in real-time!", { icon: '🔔' });
+    } catch (err) {
+      console.error("Failed to create test alert:", err);
+      toast.error("Failed to simulate notification");
+    }
+  };
+
+  const getNotificationIcon = (message: string) => {
+    const msg = message.toLowerCase();
+    if (msg.includes('resolved') || msg.includes('remediat')) {
+      return <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />;
+    }
+    if (msg.includes('assign') || msg.includes('dispatch') || msg.includes('crew')) {
+      return <Construction className="w-4 h-4 text-[#FF9933]" />;
+    }
+    if (msg.includes('vote') || msg.includes('verif') || msg.includes('merge')) {
+      return <Combine className="w-4 h-4 text-[#003366] dark:text-[#F4C430]" />;
+    }
+    if (msg.includes('comment') || msg.includes('discussion') || msg.includes('repl')) {
+      return <MessageSquare className="w-4 h-4 text-blue-500" />;
+    }
+    return <AlertCircle className="w-4 h-4 text-slate-500" />;
+  };
+
 
   useEffect(() => {
     if (messaging) {
@@ -249,10 +429,126 @@ export default function Layout({ children }: LayoutProps) {
 
           {user ? (
             <div className="flex items-center gap-4" id="user-profile-menu">
-              <button className="p-2 text-[#4B5563] hover:text-[#003366] relative transition-colors duration-150">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-1.5 right-1.5 block h-2 w-2 rounded-full bg-[#138808] ring-2 ring-white"></span>
-              </button>
+              <div className="relative" ref={dropdownRef} id="notifications-menu">
+                <button 
+                  onClick={() => setShowNotifDropdown(!showNotifDropdown)}
+                  className="p-2 text-[#4B5563] hover:text-[#003366] dark:text-gray-300 dark:hover:text-amber-400 relative transition-colors duration-150 focus:outline-none"
+                  aria-label="Toggle notifications"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notifications.filter(n => !n.is_read).length > 0 && (
+                    <span className="absolute top-1.5 right-1.5 block h-2 w-2 rounded-full bg-[#138808] ring-2 ring-white animate-pulse"></span>
+                  )}
+                </button>
+
+                <AnimatePresence>
+                  {showNotifDropdown && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 mt-2.5 w-80 sm:w-96 bg-white dark:bg-[#1A202C] rounded-2xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 overflow-hidden z-50 border border-slate-100 dark:border-slate-800"
+                    >
+                      {/* Dropdown Header */}
+                      <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-800 dark:text-white uppercase tracking-wider">Alerts</span>
+                          {notifications.filter(n => !n.is_read).length > 0 && (
+                            <span className="bg-red-50 text-red-600 text-[10px] font-bold px-2 py-0.5 rounded-full dark:bg-red-950/40 dark:text-red-400">
+                              {notifications.filter(n => !n.is_read).length} new
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={triggerTestAlert}
+                            className="text-[10px] text-[#003366] hover:underline dark:text-amber-400 mr-2 uppercase tracking-wider font-semibold"
+                            title="Simulate a real-time civic alert for testing"
+                          >
+                            Simulate
+                          </button>
+                          {notifications.filter(n => !n.is_read).length > 0 && (
+                            <button
+                              onClick={handleMarkAllAsRead}
+                              className="text-[10px] text-slate-500 hover:text-[#003366] dark:text-gray-400 dark:hover:text-amber-400 transition-colors flex items-center gap-1 uppercase tracking-wider font-semibold"
+                            >
+                              <Check className="w-3 h-3" />
+                              All Read
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Dropdown Body */}
+                      <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                        {notifications.length === 0 ? (
+                          <div className="py-12 px-4 text-center flex flex-col items-center justify-center">
+                            <div className="w-12 h-12 rounded-full bg-slate-50 dark:bg-slate-900 flex items-center justify-center mb-3">
+                              <Bell className="w-6 h-6 text-slate-400" />
+                            </div>
+                            <p className="text-sm font-semibold text-slate-700 dark:text-gray-300">Your feed is clear</p>
+                            <p className="text-xs text-slate-400 dark:text-gray-500 mt-1 max-w-[200px]">You'll get real-time status updates on your reported issues here.</p>
+                          </div>
+                        ) : (
+                          notifications.map((notif) => (
+                            <div
+                              key={notif.notification_id}
+                              onClick={() => handleNotificationClick(notif)}
+                              className={`flex gap-3.5 p-4 text-left transition-colors cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-900/50 ${
+                                !notif.is_read ? 'bg-slate-50/40 dark:bg-slate-900/10 border-l-2 border-[#003366] dark:border-amber-400' : ''
+                              }`}
+                            >
+                              <div className="flex-shrink-0 mt-0.5">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                                  !notif.is_read 
+                                    ? 'bg-[#003366]/10 text-[#003366] dark:bg-amber-500/10 dark:text-amber-400' 
+                                    : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                                }`}>
+                                  {getNotificationIcon(notif.message)}
+                                </div>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-xs text-slate-700 dark:text-gray-300 leading-relaxed break-words ${
+                                  !notif.is_read ? 'font-medium' : ''
+                                }`}>
+                                  {notif.message}
+                                </p>
+                                <div className="flex items-center gap-2 mt-2">
+                                  <span className="text-[10px] text-slate-400 dark:text-gray-500 font-medium">
+                                    {new Date(notif.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })} at {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                  {!notif.is_read && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMarkAsRead(notif.notification_id);
+                                      }}
+                                      className="text-[10px] text-[#003366] dark:text-amber-400 hover:underline font-semibold"
+                                    >
+                                      Dismiss
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Dropdown Footer */}
+                      <div className="p-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/20 text-center">
+                        <button
+                          onClick={() => setShowNotifDropdown(false)}
+                          className="w-full text-center text-xs py-1.5 text-slate-500 dark:text-gray-400 hover:text-slate-800 dark:hover:text-white transition-colors uppercase tracking-wider font-semibold"
+                        >
+                          Close Panel
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
 
               <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
                 <Link to="/profile" className="flex items-center gap-3 hover:opacity-90 transition-opacity">

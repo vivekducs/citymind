@@ -17,7 +17,10 @@ import {
   ExternalLink,
   ChevronDown,
   Cpu,
-  Layers
+  Layers,
+  Camera,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { toast, Toaster } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
@@ -31,6 +34,7 @@ interface Comment {
   text: string;
   upvotes: number;
   created_at: string;
+  reopen_image_url?: string;
 }
 
 interface Issue {
@@ -55,6 +59,12 @@ interface Issue {
   assigned_to?: string;
 }
 
+const reopenSamplePhotos = [
+  { name: 'Issue Still Unresolved', url: 'https://images.unsplash.com/photo-1599740831146-80a6b7cd905e?auto=format&fit=crop&q=80&w=800' },
+  { name: 'Poor Quality Repair', url: 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&q=80&w=800' },
+  { name: 'Recurring Problem', url: 'https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&q=80&w=800' },
+];
+
 export default function IssueDetail() {
   const { issueId } = useParams<{ issueId: string }>();
   const { user } = useAuth();
@@ -67,6 +77,11 @@ export default function IssueDetail() {
   const [loading, setLoading] = useState(true);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [commentsLimit, setCommentsLimit] = useState(10);
+
+  // Reopen flow states
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenImage, setReopenImage] = useState('');
+  const [isReopening, setIsReopening] = useState(false);
 
   // 1. Live Snapshot Listener for the Single Issue Doc
   useEffect(() => {
@@ -281,6 +296,69 @@ export default function IssueDetail() {
       // Revert
       setComments(prev => prev.map(c => c.comment_id === commentId ? { ...c, upvotes: Math.max(0, c.upvotes - 1) } : c));
       toast.error("Upvote failed.");
+    }
+  };
+
+  const handleReopen = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      toast.error("Please sign in to reopen this issue.");
+      return;
+    }
+    if (!issueId || !issue) return;
+    if (!reopenReason.trim()) {
+      toast.error("Please provide a comment/reason for reopening this issue.");
+      return;
+    }
+    if (!reopenImage) {
+      toast.error("Please upload or select an image showing that the issue still persists.");
+      return;
+    }
+
+    setIsReopening(true);
+    try {
+      const issueRef = doc(db, 'issues', issueId);
+      const updatedUrls = [...(issue.image_urls || []), reopenImage];
+      
+      // Update the issue in firestore
+      await updateDoc(issueRef, {
+        status: 'reported',
+        image_urls: updatedUrls,
+        updated_at: new Date().toISOString()
+      });
+
+      // Add a comment to the issue
+      const commentId = 'reopen_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'issues', issueId, 'comments', commentId), {
+        comment_id: commentId,
+        issue_id: issueId,
+        author_id: user.user_id,
+        author_name: user.name,
+        text: `[REOPENED] ${reopenReason}`,
+        upvotes: 0,
+        created_at: new Date().toISOString(),
+        reopen_image_url: reopenImage
+      });
+
+      // Create a notification for admins
+      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', notifId), {
+        notification_id: notifId,
+        issue_id: issueId,
+        user_id: user.user_id,
+        message: `⚠️ [Incident Reopened] Issue "${issue.title}" has been reopened by ${user.name}. Reason: ${reopenReason}`,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+
+      toast.success("Incident successfully reopened!");
+      setReopenReason('');
+      setReopenImage('');
+    } catch (err) {
+      console.error("Failed to reopen issue:", err);
+      toast.error("An error occurred while reopening the issue.");
+    } finally {
+      setIsReopening(false);
     }
   };
 
@@ -511,6 +589,111 @@ export default function IssueDetail() {
             </div>
           </div>
 
+          {/* Reopen Incident Portal */}
+          {issue.status.toLowerCase() === 'resolved' && (
+            <div className="bg-amber-50/40 border border-amber-200 rounded-2xl p-6 md:p-8 shadow-sm space-y-6" id="reopen-portal-card">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Reopen Incident Portal</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    If this civic issue is still unresolved, recurred, or the municipal action was insufficient, you can reopen it. A detailed reason and proof photo are mandatory.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleReopen} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">Reopen Reason & Comments</label>
+                  <textarea
+                    rows={3}
+                    required
+                    placeholder="Provide specific details about why this issue is not fully resolved..."
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    className="w-full p-4 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:outline-none transition-all duration-150 resize-none"
+                  ></textarea>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">Proof Photo (Mandatory)</label>
+                  
+                  {reopenImage ? (
+                    <div className="relative aspect-video max-w-md rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shadow-sm">
+                      <img src={reopenImage} alt="Reopen proof" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      <button
+                        type="button"
+                        onClick={() => setReopenImage('')}
+                        className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors shadow-md"
+                        title="Remove photo"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              if (typeof reader.result === 'string') {
+                                setReopenImage(reader.result);
+                                toast.success("Reopen proof image uploaded!");
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                          className="hidden"
+                          id="reopen-file-upload"
+                        />
+                        <label
+                          htmlFor="reopen-file-upload"
+                          className="flex-1 py-3 bg-white hover:bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-700 text-center cursor-pointer flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                        >
+                          <Camera className="w-4 h-4 text-slate-500" /> Upload Custom Photo
+                        </label>
+                      </div>
+
+                      <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider text-center">— Or select simulated evidence preset —</div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {reopenSamplePhotos.map((p, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => {
+                              setReopenImage(p.url);
+                              toast.success(`Selected proof preset: ${p.name}`);
+                            }}
+                            className="p-2 bg-white border border-slate-200 rounded-xl text-xs hover:border-amber-500 hover:bg-amber-50/30 transition-all text-slate-700 font-medium text-left truncate flex items-center gap-2 shadow-sm"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-slate-200/50 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isReopening || !reopenReason.trim() || !reopenImage}
+                    className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-md shadow-amber-50 flex items-center gap-2"
+                  >
+                    {isReopening ? "Reopening Incident..." : "Reopen Incident"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
           {/* Comments Section */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 md:p-8 shadow-sm space-y-6" id="comments-pane">
             <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
@@ -564,6 +747,18 @@ export default function IssueDetail() {
                     <p className="text-xs text-slate-600 leading-relaxed pl-8">
                       {comment.text}
                     </p>
+                    {comment.reopen_image_url && (
+                      <div className="pl-8 pt-1">
+                        <div className="relative aspect-video max-w-sm rounded-lg overflow-hidden bg-slate-100 border border-slate-200 shadow-sm">
+                          <img 
+                            src={comment.reopen_image_url} 
+                            alt="Reopen evidence proof" 
+                            className="w-full h-full object-cover" 
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      </div>
+                    )}
                     <div className="pl-8 flex items-center gap-3">
                       <button 
                         onClick={() => handleUpvoteComment(comment.comment_id)}

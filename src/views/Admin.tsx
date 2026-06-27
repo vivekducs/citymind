@@ -29,11 +29,14 @@ import {
   Eye,
   Camera,
   Layers,
-  RefreshCw
+  RefreshCw,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../api';
+import { toast } from 'react-hot-toast';
 
 interface StaffMember {
   id: string;
@@ -77,12 +80,21 @@ export default function Admin() {
   const [adminNotes, setAdminNotes] = useState<{ id: string; text: string; created_at: string }[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenImage, setReopenImage] = useState('');
+  const [isReopening, setIsReopening] = useState(false);
 
   // --- Preselected realistic resolution preview photos for simulation ---
   const resolvedSamplePhotos = [
     { name: 'Road Resurfaced', url: 'https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&q=80&w=800' },
     { name: 'Water Pipe Replaced', url: 'https://images.unsplash.com/photo-1581094288338-2314dddb7ecc?auto=format&fit=crop&q=80&w=800' },
     { name: 'Sanitation Cleared', url: 'https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?auto=format&fit=crop&q=80&w=800' },
+  ];
+
+  const reopenSamplePhotos = [
+    { name: 'Issue Still Unresolved', url: 'https://images.unsplash.com/photo-1599740831146-80a6b7cd905e?auto=format&fit=crop&q=80&w=800' },
+    { name: 'Poor Quality Repair', url: 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&q=80&w=800' },
+    { name: 'Recurring Problem', url: 'https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&q=80&w=800' },
   ];
 
   // 1. Live listener for issues from Firestore
@@ -367,6 +379,67 @@ export default function Admin() {
       console.error("Photo upload simulation failed:", err);
     } finally {
       setUploadingPhoto(false);
+    }
+  };
+
+  // Reopen resolved issue from admin panel
+  const handleReopenIssue = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedIssue) return;
+    if (!reopenReason.trim()) {
+      toast.error("Please enter a reason/comment for reopening this issue.");
+      return;
+    }
+    if (!reopenImage) {
+      toast.error("An evidence photo is mandatory to reopen this issue.");
+      return;
+    }
+
+    setIsReopening(true);
+    try {
+      const issueRef = doc(db, 'issues', selectedIssue.issue_id);
+      const updatedUrls = [...(selectedIssue.image_urls || []), reopenImage];
+      const updateObj = {
+        status: 'reported',
+        image_urls: updatedUrls,
+        updated_at: new Date().toISOString()
+      };
+      
+      // Update issue document
+      await updateDoc(issueRef, updateObj);
+
+      // Create an internal admin note about the reopen
+      const noteId = 'note_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'admin_notes', noteId), {
+        note_id: noteId,
+        issue_id: selectedIssue.issue_id,
+        author_id: 'authority_officer',
+        text: `[REOPENED] ${reopenReason}`,
+        created_at: new Date().toISOString()
+      });
+
+      // Add a public comment to the comments subcollection so citizens see it too
+      const commentId = 'reopen_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'issues', selectedIssue.issue_id, 'comments', commentId), {
+        comment_id: commentId,
+        issue_id: selectedIssue.issue_id,
+        author_id: user?.user_id || 'authority_officer',
+        author_name: user?.name || 'Municipal Admin',
+        text: `[REOPENED] ${reopenReason}`,
+        upvotes: 0,
+        created_at: new Date().toISOString(),
+        reopen_image_url: reopenImage
+      });
+
+      setSelectedIssue(prev => prev ? { ...prev, ...updateObj } : null);
+      setReopenReason('');
+      setReopenImage('');
+      toast.success("Incident reopened and dispatched back to pipeline!");
+    } catch (err) {
+      console.error("Failed to reopen issue from admin:", err);
+      toast.error("Failed to reopen issue.");
+    } finally {
+      setIsReopening(false);
     }
   };
 
@@ -1002,8 +1075,8 @@ export default function Admin() {
                   )}
 
                   {/* Pipeline Transitions */}
-                  {selectedIssue.status !== 'resolved' && (
-                    <div className="space-y-2 pt-2 border-t border-slate-200/80">
+                  {selectedIssue.status !== 'resolved' ? (
+                    <div className="space-y-3 pt-2 border-t border-slate-200/80">
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Advance Dispatch Pipeline</label>
                       <div className="grid grid-cols-1 gap-2">
                         {selectedIssue.status === 'reported' && (
@@ -1022,12 +1095,201 @@ export default function Admin() {
                             <Hammer className="w-3.5 h-3.5" /> Dispatched to Repair
                           </button>
                         )}
+                        
+                        {/* Interactive Fix Image Section */}
+                        <div className="bg-white p-3 border border-slate-200 rounded-xl space-y-2 my-1">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Resolution Photo / Fix Image (Mandatory)</span>
+                          {selectedIssue.before_after_photos?.[0] ? (
+                            <div className="relative aspect-video w-full rounded-lg overflow-hidden bg-slate-50 border border-slate-100">
+                              <img src={selectedIssue.before_after_photos[0]} alt="Fix image" className="w-full h-full object-cover" />
+                              <button
+                                onClick={async () => {
+                                  const issueRef = doc(db, 'issues', selectedIssue.issue_id);
+                                  await updateDoc(issueRef, { before_after_photos: [] });
+                                  setSelectedIssue(prev => prev ? { ...prev, before_after_photos: [] } : null);
+                                  toast.success("Fix image cleared");
+                                }}
+                                className="absolute top-1.5 right-1.5 p-1 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors"
+                                title="Remove fix image"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onloadend = async () => {
+                                    if (typeof reader.result === 'string') {
+                                      await handleUploadResolutionPhoto(reader.result);
+                                      toast.success("Fix image uploaded successfully!");
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                }}
+                                className="hidden"
+                                id="dispatch-fix-upload"
+                              />
+                              <label
+                                htmlFor="dispatch-fix-upload"
+                                className="w-full py-1.5 bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 rounded-lg text-[10px] font-bold text-slate-700 text-center cursor-pointer flex items-center justify-center gap-1"
+                              >
+                                <Camera className="w-3.5 h-3.5 text-slate-500" /> Upload Fix Image File
+                              </label>
+                              
+                              <div className="text-[9px] text-slate-400 text-center font-bold uppercase tracking-wider">— OR select preset below —</div>
+                              
+                              <div className="grid grid-cols-3 gap-1">
+                                {resolvedSamplePhotos.map((p, i) => (
+                                  <button
+                                    key={i}
+                                    onClick={() => {
+                                      handleUploadResolutionPhoto(p.url);
+                                      toast.success(`Fix image selected: ${p.name}`);
+                                    }}
+                                    disabled={uploadingPhoto}
+                                    className="px-1 py-1 bg-white border border-slate-200 rounded-lg text-[9px] font-bold hover:bg-slate-50 transition-colors cursor-pointer text-slate-700 truncate"
+                                    title={p.name}
+                                  >
+                                    {p.name.split(' ')[0]}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         <button
-                          onClick={() => handleStatusChange('resolved')}
-                          className="w-full h-10 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-md shadow-emerald-50"
+                          onClick={() => {
+                            const hasFixImage = selectedIssue.before_after_photos && selectedIssue.before_after_photos.length > 0;
+                            if (!hasFixImage) {
+                              toast.error("Please upload or select a fix image (resolution photo) before closing the case.");
+                              return;
+                            }
+                            handleStatusChange('resolved');
+                          }}
+                          className={`w-full h-10 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                            selectedIssue.before_after_photos && selectedIssue.before_after_photos.length > 0
+                              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-50'
+                              : 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
+                          }`}
                         >
-                          <Check className="w-3.5 h-3.5" /> Close Incident & Resolve
+                          <Check className="w-3.5 h-3.5" /> 
+                          {selectedIssue.before_after_photos && selectedIssue.before_after_photos.length > 0
+                            ? "Close Incident & Resolve"
+                            : "Close Case (Fix Image Required)"
+                          }
                         </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Admin Reopen Incident Portal */
+                    <div className="space-y-4 pt-2 border-t border-slate-200/80">
+                      <div className="bg-amber-50/40 border border-amber-200 rounded-xl p-4 space-y-4">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <h4 className="text-xs font-bold text-slate-950">Reopen Incident</h4>
+                            <p className="text-[10px] text-slate-500 mt-0.5 leading-normal">
+                              This incident is currently closed. If community alerts or inspection shows the issue is still active, reopen it here. A detailed comment and evidence photo are mandatory.
+                            </p>
+                          </div>
+                        </div>
+
+                        <form onSubmit={handleReopenIssue} className="space-y-3">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">Reopen Reason & Note</label>
+                            <textarea
+                              rows={3}
+                              required
+                              placeholder="Detailed explanation of why the issue is still present..."
+                              value={reopenReason}
+                              onChange={(e) => setReopenReason(e.target.value)}
+                              className="w-full p-2.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:outline-none transition-all resize-none"
+                            ></textarea>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">Evidence Proof (Mandatory)</label>
+                            
+                            {reopenImage ? (
+                              <div className="relative aspect-video w-full rounded-lg overflow-hidden bg-slate-50 border border-slate-100 shadow-sm">
+                                <img src={reopenImage} alt="Reopen evidence" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                <button
+                                  type="button"
+                                  onClick={() => setReopenImage('')}
+                                  className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors shadow-md"
+                                  title="Remove photo"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <div className="flex gap-2">
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      const reader = new FileReader();
+                                      reader.onloadend = () => {
+                                        if (typeof reader.result === 'string') {
+                                          setReopenImage(reader.result);
+                                          toast.success("Reopen proof uploaded!");
+                                        }
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }}
+                                    className="hidden"
+                                    id="admin-reopen-file"
+                                  />
+                                  <label
+                                    htmlFor="admin-reopen-file"
+                                    className="flex-1 py-1.5 bg-white hover:bg-slate-50 border border-dashed border-slate-300 rounded-lg text-[10px] font-bold text-slate-700 text-center cursor-pointer flex items-center justify-center gap-1 shadow-sm transition-colors"
+                                  >
+                                    <Camera className="w-3.5 h-3.5 text-slate-500" /> Upload Custom Photo
+                                  </label>
+                                </div>
+
+                                <div className="text-[9px] text-slate-400 font-medium uppercase tracking-wider text-center">— OR CHOOSE PRESET —</div>
+
+                                <div className="grid grid-cols-3 gap-1">
+                                  {reopenSamplePhotos.map((p, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      onClick={() => {
+                                        setReopenImage(p.url);
+                                        toast.success(`Preset selected: ${p.name}`);
+                                      }}
+                                      className="p-1 bg-white border border-slate-200 rounded-lg text-[9px] hover:border-amber-500 transition-all text-slate-700 font-bold truncate block"
+                                      title={p.name}
+                                    >
+                                      {p.name.split(' ')[0]}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-200/50 flex justify-end">
+                            <button
+                              type="submit"
+                              disabled={isReopening || !reopenReason.trim() || !reopenImage}
+                              className="w-full py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold text-xs rounded-lg transition-all cursor-pointer shadow-md shadow-amber-50 flex items-center justify-center gap-1"
+                            >
+                              {isReopening ? "Reopening Incident..." : "Reopen Incident & Dispatch"}
+                            </button>
+                          </div>
+                        </form>
                       </div>
                     </div>
                   )}

@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
@@ -36,9 +37,50 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp, "ai-studio-citymind-825e5b72-a31a-4304-83b7-64e929b5fded");
 
+async function getImagePart(imageUrl: string): Promise<any | null> {
+  if (!imageUrl) return null;
+  
+  try {
+    if (imageUrl.startsWith('data:')) {
+      const matches = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        return {
+          inlineData: {
+            mimeType: matches[1],
+            data: matches[2]
+          }
+        };
+      }
+    } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const response = await fetch(imageUrl);
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString('base64');
+        const mimeType = response.headers.get('content-type') || 'image/jpeg';
+        return {
+          inlineData: {
+            mimeType,
+            data: base64
+          }
+        };
+      }
+    }
+  } catch (error) {
+    console.error("Failed to parse or fetch image for Gemini:", error);
+  }
+  return null;
+}
+
 async function bootstrap() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsDir));
 
   // Log requests
   app.use((req, res, next) => {
@@ -49,6 +91,41 @@ async function bootstrap() {
   // REST API Routes
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // POST /api/upload
+  app.post('/api/upload', async (req, res) => {
+    try {
+      const { image } = req.body;
+      if (!image) {
+        return res.status(400).json({ error: "No image data provided" });
+      }
+
+      if (image.startsWith('data:')) {
+        const matches = image.match(/^data:([^;]+);base64,(.+)$/);
+        if (!matches || matches.length !== 3) {
+          return res.status(400).json({ error: "Invalid base64 image format" });
+        }
+        
+        const mimeType = matches[1];
+        const base64Data = matches[2];
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        const ext = mimeType.split('/')[1] || 'jpg';
+        const filename = `upload_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
+        const filePath = path.join(process.cwd(), 'uploads', filename);
+        
+        await fs.promises.writeFile(filePath, buffer);
+        
+        const fileUrl = `/uploads/${filename}`;
+        return res.json({ url: fileUrl });
+      }
+
+      return res.status(400).json({ error: "Unsupported upload format (must be base64 data-uri)" });
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   // POST /api/auth/register
@@ -150,7 +227,7 @@ async function bootstrap() {
         `;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.5-flash',
           contents: prompt
         });
 
@@ -224,15 +301,13 @@ async function bootstrap() {
     const { image_url } = req.body;
     // We can run the same gemini analysis using image_url or a standard prompt
     const title = "Visual Analysis";
-    const description = "Analyze image for civic disruption: " + (image_url || "");
     
-    // Delegate to insights
     try {
       const geminiKey = process.env.GEMINI_API_KEY;
       if (geminiKey && geminiKey !== 'MY_GEMINI_API_KEY') {
         const ai = new GoogleGenAI({ apiKey: geminiKey });
         const prompt = `
-          Analyze this reported civic issue image url: "${image_url}".
+          Analyze this reported civic issue image.
           Identify any visual anomalies or civic issues (e.g. pothole, garbage, water leak, broken streetlight, traffic congestion, medical waste).
           Classify the issue into one of these exact categories: "Roads", "Water", "Electricity", "Waste", "Traffic", "Healthcare", "Education".
           Select an appropriate subcategory.
@@ -246,9 +321,23 @@ async function bootstrap() {
             "confidence": 92
           }
         `;
+
+        const imagePart = await getImagePart(image_url);
+        let contents: any;
+        if (imagePart) {
+          contents = {
+            parts: [
+              imagePart,
+              { text: prompt }
+            ]
+          };
+        } else {
+          contents = prompt + (image_url ? ` (Image source provided: ${image_url.substring(0, 100)}...)` : '');
+        }
+
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt
+          model: 'gemini-3.5-flash',
+          contents: contents
         });
         const textResponse = response.text || '';
         const cleanJsonStr = textResponse.substring(
@@ -328,6 +417,17 @@ async function bootstrap() {
       };
 
       await setDoc(doc(db, 'issues', issue_id), newIssue);
+
+      // Add initial submission notification
+      const initialNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', initialNotifId), {
+        notification_id: initialNotifId,
+        issue_id: issue_id,
+        user_id: created_by || 'anonymous',
+        message: `Your reported issue "${title}" has been successfully logged and submitted.`,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
 
       // Trigger Autonomous Ingestion & Dispatch Agent (Agent 1)
       try {
@@ -661,7 +761,6 @@ async function bootstrap() {
           
           Title: ${issue.title}
           Description: ${issue.description || 'No description provided'}
-          Image URL: ${imageUrl || 'No image'}
           
           Output format (JSON ONLY, no markdown):
           {
@@ -677,9 +776,23 @@ async function bootstrap() {
           Available Categories are strictly: "Roads", "Water", "Electricity", "Waste", "Traffic", "Healthcare", "Education".
           Select severity strictly from: "low", "medium", "high", "critical".
         `;
+
+        const imagePart = await getImagePart(imageUrl);
+        let contents: any;
+        if (imagePart) {
+          contents = {
+            parts: [
+              imagePart,
+              { text: prompt }
+            ]
+          };
+        } else {
+          contents = prompt;
+        }
+
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt
+          model: 'gemini-3.5-flash',
+          contents: contents
         });
         const textResponse = response.text || '';
         const cleanJsonStr = textResponse.substring(
@@ -728,6 +841,17 @@ async function bootstrap() {
       agent_actions: updatedActions
     });
 
+    // Send Ingestion Agent notification
+    const ingestNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+    await setDoc(doc(db, 'notifications', ingestNotifId), {
+      notification_id: ingestNotifId,
+      issue_id: issueId,
+      user_id: issue.created_by || 'anonymous',
+      message: `🤖 Ingestion Agent: Issue triaged! Class: ${category} / ${subcategory}. Dispatched to: ${department}.`,
+      is_read: false,
+      created_at: new Date().toISOString()
+    });
+
     return {
       issue_id: issueId,
       category,
@@ -763,16 +887,18 @@ async function bootstrap() {
       allIssues.push(d.data());
     });
 
+    // Strictly match department, category, and subcategory
     const candidates = allIssues.filter(other => 
       other.issue_id !== issueId &&
       other.status !== 'Duplicate' &&
       other.status !== 'resolved' &&
-      other.category === issue.category
+      other.category === issue.category &&
+      (other.subcategory || '').toLowerCase() === (issue.subcategory || '').toLowerCase() &&
+      other.department === issue.department
     );
 
     let bestMatch: any = null;
     let minDistance = Infinity;
-    let maxSimilarity = 0;
 
     for (const other of candidates) {
       const dist = getCoordinatesDistanceMeters(
@@ -780,14 +906,10 @@ async function bootstrap() {
         other.location.lat, other.location.lng
       );
 
+      // Must be same location (distance <= 80 meters)
       if (dist <= 80) {
-        const textSim = getSimilarity(issue.title + " " + issue.description, other.title + " " + other.description);
-        const subcategoryMatch = issue.subcategory.toLowerCase() === other.subcategory.toLowerCase();
-        
-        const isDuplicateMatch = textSim >= 0.35 || (subcategoryMatch && textSim >= 0.15);
-        if (isDuplicateMatch && (dist < minDistance || textSim > maxSimilarity)) {
+        if (dist < minDistance) {
           minDistance = dist;
-          maxSimilarity = textSim;
           bestMatch = other;
         }
       }
@@ -801,8 +923,7 @@ async function bootstrap() {
         output: {
           is_duplicate: true,
           merged_into: bestMatch.issue_id,
-          distance_meters: Math.round(minDistance),
-          text_similarity: parseFloat(maxSimilarity.toFixed(2))
+          distance_meters: Math.round(minDistance)
         }
       };
 
@@ -847,19 +968,42 @@ async function bootstrap() {
       };
       await setDoc(doc(db, 'issues', bestMatch.issue_id, 'comments', commentId), commentData);
 
-      // Create notification record for client push notification
-      const notification_id = 'notif_' + Math.random().toString(36).substr(2, 9);
-      const notificationDoc = {
-        notification_id,
+      // 1. Notify the duplicate reporter
+      const dupNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', dupNotifId), {
+        notification_id: dupNotifId,
         issue_id: issueId,
         user_id: issue.created_by || 'anonymous',
-        message: `We found an existing report nearby (Issue #${bestMatch.issue_id}). Your verification has been merged!`,
+        message: `🤖 Duplicate Agent: Your report of "${issue.title}" matches master issue #${bestMatch.issue_id} in the same location, department, and category. Your verification has been merged.`,
         is_read: false,
         created_at: new Date().toISOString()
-      };
-      await setDoc(doc(db, 'notifications', notification_id), notificationDoc);
+      });
 
-      console.log(`Duplicate Agent: Issue #${issueId} merged with #${bestMatch.issue_id} (similarity=${maxSimilarity.toFixed(2)}, distance=${Math.round(minDistance)}m)`);
+      // 2. Notify the master issue creator
+      const masterNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', masterNotifId), {
+        notification_id: masterNotifId,
+        issue_id: bestMatch.issue_id,
+        user_id: bestMatch.created_by || 'anonymous',
+        message: `🤖 Duplicate Agent: A duplicate report was identified nearby and successfully merged into your issue #${bestMatch.issue_id}. Verification percentage: ${verification_percentage}%.`,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+
+      // 3. Notify the assigned officer of the master issue if there is one
+      if (bestMatch.assigned_to_person) {
+        const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+        await setDoc(doc(db, 'notifications', officerNotifId), {
+          notification_id: officerNotifId,
+          issue_id: bestMatch.issue_id,
+          user_id: bestMatch.assigned_to_person,
+          message: `🤖 Duplicate Agent: An additional duplicate report was merged into your assigned issue #${bestMatch.issue_id}.`,
+          is_read: false,
+          created_at: new Date().toISOString()
+        });
+      }
+
+      console.log(`Duplicate Agent: Issue #${issueId} merged with #${bestMatch.issue_id} (distance=${Math.round(minDistance)}m)`);
 
       return {
         is_duplicate: true,
@@ -867,6 +1011,17 @@ async function bootstrap() {
         message: `We found an existing report nearby (Issue #${bestMatch.issue_id}). Your verification has been merged!`
       };
     }
+
+    // If no duplicate is found, send a notification
+    const uniqueNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+    await setDoc(doc(db, 'notifications', uniqueNotifId), {
+      notification_id: uniqueNotifId,
+      issue_id: issueId,
+      user_id: issue.created_by || 'anonymous',
+      message: `🤖 Duplicate Agent: No duplicate reports found nearby for "${issue.title}". Checked matching category, subcategory, and department.`,
+      is_read: false,
+      created_at: new Date().toISOString()
+    });
 
     return { 
       is_duplicate: false,
@@ -1042,6 +1197,30 @@ async function bootstrap() {
           };
           await setDoc(doc(db, 'issues', issue.issue_id, 'comments', commentId), commentData);
 
+          // Push notifications to citizen
+          const notification_id = 'notif_' + Math.random().toString(36).substr(2, 9);
+          await setDoc(doc(db, 'notifications', notification_id), {
+            notification_id,
+            issue_id: issue.issue_id,
+            user_id: issue.created_by || 'anonymous',
+            message: `🤖 Escalation Agent: Consensus verified! Issue #${issue.issue_id} has been auto-escalated to Level ${nextEscalationLevel} (${nextStatus.toUpperCase()}) for direct response.`,
+            is_read: false,
+            created_at: new Date().toISOString()
+          });
+
+          // Push notifications to assigned officer if there is one
+          if (issue.assigned_to_person) {
+            const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+            await setDoc(doc(db, 'notifications', officerNotifId), {
+              notification_id: officerNotifId,
+              issue_id: issue.issue_id,
+              user_id: issue.assigned_to_person,
+              message: `🤖 Escalation Agent: Issue #${issue.issue_id} you are assigned to has been escalated to Level ${nextEscalationLevel} (${nextStatus.toUpperCase()}).`,
+              is_read: false,
+              created_at: new Date().toISOString()
+            });
+          }
+
           escalatedIds.push(issue.issue_id);
           continue;
         }
@@ -1081,6 +1260,30 @@ async function bootstrap() {
             created_at: new Date().toISOString()
           };
           await setDoc(doc(db, 'issues', issue.issue_id, 'comments', commentId), commentData);
+
+          // Push notification to citizen
+          const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+          await setDoc(doc(db, 'notifications', notifId), {
+            notification_id: notifId,
+            issue_id: issue.issue_id,
+            user_id: issue.created_by || 'anonymous',
+            message: `🤖 Sentinel Resolution Agent: Physical on-site repair completed! Your reported issue is now RESOLVED.`,
+            is_read: false,
+            created_at: new Date().toISOString()
+          });
+
+          // Push notification to assigned officer if there is one
+          if (issue.assigned_to_person) {
+            const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+            await setDoc(doc(db, 'notifications', officerNotifId), {
+              notification_id: officerNotifId,
+              issue_id: issue.issue_id,
+              user_id: issue.assigned_to_person,
+              message: `🤖 Sentinel Resolution Agent: Assigned issue #${issue.issue_id} has been successfully resolved.`,
+              is_read: false,
+              created_at: new Date().toISOString()
+            });
+          }
 
           resolvedIds.push(issue.issue_id);
         }
@@ -1510,6 +1713,19 @@ async function bootstrap() {
       }
 
       const issueData = snap.data();
+
+      // Retrieve Officer/Staff Name
+      let officerName = assigned_to_person_id;
+      try {
+        const staffRef = doc(db, 'staff', assigned_to_person_id);
+        const staffSnap = await getDoc(staffRef);
+        if (staffSnap.exists()) {
+          officerName = staffSnap.data().name || assigned_to_person_id;
+        }
+      } catch (staffErr) {
+        console.warn("Could not retrieve staff name:", staffErr);
+      }
+
       const updatedFields = {
         assigned_to_person: assigned_to_person_id,
         status: "Assigned",
@@ -1526,23 +1742,33 @@ async function bootstrap() {
         issue_id: issue_id,
         author_id: 'authority_dispatcher',
         author_name: '🛡️ Department Dispatcher',
-        text: `Issue has been successfully assigned to worker: ${assigned_to_person_id}. Dispatch status set to ASSIGNED.`,
+        text: `Issue has been successfully assigned to worker: ${officerName}. Dispatch status set to ASSIGNED.`,
         upvotes: 0,
         created_at: new Date().toISOString()
       };
       await setDoc(doc(db, 'issues', issue_id, 'comments', commentId), commentData);
 
-      // Push notification to citizen
-      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
-      const notifDoc = {
-        notification_id: notifId,
+      // 1. Push notification to citizen
+      const userNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', userNotifId), {
+        notification_id: userNotifId,
         issue_id,
         user_id: issueData.created_by || 'anonymous',
-        message: `Your reported issue "${issueData.title}" is now assigned to our municipal field crew for repair.`,
+        message: `Your reported issue "${issueData.title}" has been assigned to officer "${officerName}" for resolution.`,
         is_read: false,
         created_at: new Date().toISOString()
-      };
-      await setDoc(doc(db, 'notifications', notifId), notifDoc);
+      });
+
+      // 2. Push notification to assigned officer
+      const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', officerNotifId), {
+        notification_id: officerNotifId,
+        issue_id,
+        user_id: assigned_to_person_id,
+        message: `You have been assigned to resolve the issue: "${issueData.title}".`,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
 
       res.json({ status: "success", message: "Issue assigned successfully", updatedFields });
     } catch (err: any) {
@@ -1620,6 +1846,13 @@ async function bootstrap() {
         return res.status(400).json({ error: "note is required" });
       }
 
+      const issueRef = doc(db, 'issues', issue_id);
+      const snap = await getDoc(issueRef);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Issue not found" });
+      }
+      const issueData = snap.data();
+
       const note_id = 'note_' + Math.random().toString(36).substr(2, 9);
       const adminNoteDoc = {
         note_id,
@@ -1630,6 +1863,30 @@ async function bootstrap() {
       };
 
       await setDoc(doc(db, 'admin_notes', note_id), adminNoteDoc);
+
+      // 1. Notify the citizen/user
+      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', notifId), {
+        notification_id: notifId,
+        issue_id,
+        user_id: issueData.created_by || 'anonymous',
+        message: `New progress note added to your issue "${issueData.title}": "${note}"`,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+
+      // 2. Notify the assigned officer if there is one
+      if (issueData.assigned_to_person) {
+        const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+        await setDoc(doc(db, 'notifications', officerNotifId), {
+          notification_id: officerNotifId,
+          issue_id,
+          user_id: issueData.assigned_to_person,
+          message: `New progress note added to your assigned issue "${issueData.title}": "${note}"`,
+          is_read: false,
+          created_at: new Date().toISOString()
+        });
+      }
 
       res.json({ status: "success", adminNoteDoc });
     } catch (err: any) {
@@ -2023,22 +2280,55 @@ async function bootstrap() {
   app.patch('/api/admin/issues/:issueId/assign', async (req, res) => {
     try {
       const issueId = req.params.issueId;
+      const { assigned_to_person_id } = req.body;
       const issueRef = doc(db, 'issues', issueId);
+      const snap = await getDoc(issueRef);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Issue not found" });
+      }
+      const issueData = snap.data();
+
+      // Retrieve Officer/Staff Name
+      let officerName = assigned_to_person_id;
+      try {
+        const staffRef = doc(db, 'staff', assigned_to_person_id);
+        const staffSnap = await getDoc(staffRef);
+        if (staffSnap.exists()) {
+          officerName = staffSnap.data().name || assigned_to_person_id;
+        }
+      } catch (staffErr) {
+        console.warn("Could not retrieve staff name:", staffErr);
+      }
+
       await updateDoc(issueRef, {
-        assigned_to_person: req.body.assigned_to_person_id,
+        assigned_to_person: assigned_to_person_id,
         status: "Assigned",
         assigned_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       });
       
-      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
-      await setDoc(doc(db, 'notifications', notifId), {
-        notification_id: notifId,
+      // 1. Push notification to citizen
+      const userNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', userNotifId), {
+        notification_id: userNotifId,
         issue_id: issueId,
-        message: "Your issue is now assigned to a staff member.",
+        user_id: issueData.created_by || 'anonymous',
+        message: `Your reported issue "${issueData.title}" has been assigned to officer "${officerName}" for resolution.`,
         is_read: false,
         created_at: new Date().toISOString()
       });
+
+      // 2. Push notification to assigned officer
+      const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', officerNotifId), {
+        notification_id: officerNotifId,
+        issue_id: issueId,
+        user_id: assigned_to_person_id,
+        message: `You have been assigned to resolve the issue: "${issueData.title}".`,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+
       res.json({ success: true, message: "Assigned" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2050,20 +2340,42 @@ async function bootstrap() {
       const issueId = req.params.issueId;
       const { status, progress_note } = req.body;
       const issueRef = doc(db, 'issues', issueId);
+      const snap = await getDoc(issueRef);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Issue not found" });
+      }
+      const issueData = snap.data();
+
       const updates: any = { status, updated_at: new Date().toISOString() };
       if (status === 'Resolved' || status === 'resolved') {
         updates.resolved_at = new Date().toISOString();
       }
       await updateDoc(issueRef, updates);
       
+      // 1. Notify the citizen/user
       const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
       await setDoc(doc(db, 'notifications', notifId), {
         notification_id: notifId,
         issue_id: issueId,
-        message: "Your issue status is now: " + status,
+        user_id: issueData.created_by || 'anonymous',
+        message: `Your reported issue "${issueData.title}" status is now: ${status}.`,
         is_read: false,
         created_at: new Date().toISOString()
       });
+
+      // 2. Notify the assigned officer if there is one
+      if (issueData.assigned_to_person) {
+        const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+        await setDoc(doc(db, 'notifications', officerNotifId), {
+          notification_id: officerNotifId,
+          issue_id: issueId,
+          user_id: issueData.assigned_to_person,
+          message: `Assigned Issue Update: The issue "${issueData.title}" you are assigned to has been updated to "${status}".`,
+          is_read: false,
+          created_at: new Date().toISOString()
+        });
+      }
+
       res.json({ success: true, updates });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2072,13 +2384,47 @@ async function bootstrap() {
 
   app.post('/api/admin/issues/:issueId/progress-update', async (req, res) => {
     try {
+      const issueId = req.params.issueId;
+      const { note } = req.body;
+      const issueRef = doc(db, 'issues', issueId);
+      const snap = await getDoc(issueRef);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Issue not found" });
+      }
+      const issueData = snap.data();
+
       const noteId = 'note_' + Math.random().toString(36).substr(2, 9);
       await setDoc(doc(db, 'admin_notes', noteId), {
         note_id: noteId,
-        issue_id: req.params.issueId,
-        text: req.body.note,
+        issue_id: issueId,
+        text: note,
         created_at: new Date().toISOString()
       });
+
+      // 1. Notify the citizen/user
+      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+      await setDoc(doc(db, 'notifications', notifId), {
+        notification_id: notifId,
+        issue_id: issueId,
+        user_id: issueData.created_by || 'anonymous',
+        message: `New progress note added to your issue "${issueData.title}": "${note}"`,
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+
+      // 2. Notify the assigned officer if there is one
+      if (issueData.assigned_to_person) {
+        const officerNotifId = 'notif_' + Math.random().toString(36).substr(2, 9);
+        await setDoc(doc(db, 'notifications', officerNotifId), {
+          notification_id: officerNotifId,
+          issue_id: issueId,
+          user_id: issueData.assigned_to_person,
+          message: `New progress note added to your assigned issue "${issueData.title}": "${note}"`,
+          is_read: false,
+          created_at: new Date().toISOString()
+        });
+      }
+
       res.json({ success: true, note_id: noteId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -89,3 +89,13 @@ export interface Verification {
   comments?: string;
   created_at: string;
 }
+
+export interface Notification {
+  notification_id: string;
+  issue_id: string;
+  user_id: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+}
+
