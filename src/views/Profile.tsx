@@ -13,7 +13,8 @@ import {
   ShieldCheck, 
   CheckCircle, 
   Activity,
-  Edit2
+  Edit2,
+  Lock
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -44,7 +45,7 @@ export default function Profile() {
       } catch (err) {
         console.error(err);
         setProfile(user);
-        setVerCount(3); // mock fallback for elegant visuals
+        setVerCount(0); // fallback for elegant visuals
       } finally {
         setLoading(false);
       }
@@ -53,7 +54,7 @@ export default function Profile() {
     fetchExtraData();
   }, [user]);
 
-  const mockBadges = [
+  const badgesList = [
     { name: 'First Responder', desc: 'Reported your first hyperlocal issue', icon: Activity, color: 'bg-navy/10 text-navy border-navy/20' },
     { name: 'Community Sentinel', desc: 'Verified 5 civic reports correctly', icon: ShieldCheck, color: 'bg-saffron/10 text-saffron border-saffron/20' },
     { name: 'Eagle Eye', desc: 'Maintained credibility index above 95%', icon: CheckCircle, color: 'bg-[#138808]/10 text-[#138808] border-[#138808]/20' }
@@ -161,15 +162,28 @@ export default function Profile() {
             <p className="text-xs text-slate-500">Gain score and confirm real issues in your neighborhood to unlock higher medals of civic excellence.</p>
             
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-              {mockBadges.map((badge) => {
+              {badgesList.map((badge) => {
+                const isEarned = activeProfile.badges_earned?.includes(badge.name);
                 const IconComp = badge.icon;
                 return (
-                  <div key={badge.name} className={`p-5 rounded-2xl border text-center space-y-3 flex flex-col items-center justify-center vibe-3d ${badge.color}`}>
-                    <div className="p-3 bg-white rounded-full border border-inherit shadow-sm">
+                  <div 
+                    key={badge.name} 
+                    className={`p-5 rounded-2xl border text-center space-y-3 flex flex-col items-center justify-center vibe-3d transition-all ${
+                      isEarned 
+                        ? badge.color 
+                        : 'bg-slate-50 text-slate-400 border-slate-200/60 opacity-60'
+                    }`}
+                  >
+                    <div className="p-3 bg-white rounded-full border border-inherit shadow-sm relative">
                       <IconComp className="w-5 h-5" />
+                      {!isEarned && (
+                        <span className="absolute -bottom-1 -right-1 p-0.5 bg-slate-200 text-slate-500 rounded-full border border-white">
+                          <Lock className="w-2.5 h-2.5" />
+                        </span>
+                      )}
                     </div>
                     <div>
-                      <h4 className="font-bold text-xs">{badge.name}</h4>
+                      <h4 className={`font-bold text-xs ${isEarned ? '' : 'text-slate-500'}`}>{badge.name}</h4>
                       <p className="text-[10px] opacity-80 mt-1 leading-relaxed">{badge.desc}</p>
                     </div>
                   </div>

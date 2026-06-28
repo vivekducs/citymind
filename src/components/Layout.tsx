@@ -230,39 +230,6 @@ export default function Layout({ children }: LayoutProps) {
     }
   };
 
-  const triggerTestAlert = async () => {
-    if (!user) {
-      toast.error("Please log in first to receive notifications");
-      return;
-    }
-    try {
-      const notifId = 'notif_' + Math.random().toString(36).substr(2, 9);
-      const testNotifs = [
-        `Gemini Dispatcher auto-assigned reported leakage to Department of Water Supply.`,
-        `Your reported pothole status changed to RESOLVED. Visual proof uploaded!`,
-        `A neighbor verified and upvoted your civic report on broken streetlights.`,
-        `New community discussion on your reported garbage dump.`
-      ];
-      const randomMsg = testNotifs[Math.floor(Math.random() * testNotifs.length)];
-      
-      const newNotif = {
-        notification_id: notifId,
-        issue_id: 'sample_issue',
-        user_id: user.user_id,
-        message: randomMsg,
-        is_read: false,
-        created_at: new Date().toISOString()
-      };
-      
-      const docRef = doc(db, 'notifications', notifId);
-      await setDoc(docRef, newNotif);
-      toast.success("Simulated civic alert triggered in real-time!", { icon: '🔔' });
-    } catch (err) {
-      console.error("Failed to create test alert:", err);
-      toast.error("Failed to simulate notification");
-    }
-  };
-
   const getNotificationIcon = (message: string) => {
     const msg = message.toLowerCase();
     if (msg.includes('resolved') || msg.includes('remediat')) {
@@ -461,13 +428,6 @@ export default function Layout({ children }: LayoutProps) {
                           )}
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={triggerTestAlert}
-                            className="text-[10px] text-[#003366] hover:underline dark:text-amber-400 mr-2 uppercase tracking-wider font-semibold"
-                            title="Simulate a real-time civic alert for testing"
-                          >
-                            Simulate
-                          </button>
                           {notifications.filter(n => !n.is_read).length > 0 && (
                             <button
                               onClick={handleMarkAllAsRead}

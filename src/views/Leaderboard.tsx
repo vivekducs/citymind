@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../api';
+import { toast } from 'react-hot-toast';
 
 interface LeaderboardEntry {
   rank: number;
@@ -63,44 +64,9 @@ export default function Leaderboard() {
         throw new Error("API failed");
       }
     } catch (err) {
-      console.warn("Failed fetching live leaderboard, generating gorgeous fallback:", err);
-      // Generate ultra-realistic fallbacks
-      let mockList: LeaderboardEntry[] = [];
-      if (activeType === 'monthly_reporters') {
-        mockList = [
-          { rank: 1, username: 'Elena Rostova', score: 28, zone: 'Zone A', badge_icon: 'Community Champion' },
-          { rank: 2, username: 'Marcus Vance', score: 24, zone: 'Zone B', badge_icon: 'Problem Solver' },
-          { rank: 3, username: 'Aria Sterling', score: 19, zone: 'Zone A', badge_icon: 'Problem Solver' },
-          { rank: 4, username: 'David K.', score: 15, zone: 'Zone C', badge_icon: 'Road Warrior' },
-          { rank: 5, username: 'Priya Sharma', score: 12, zone: 'Zone B', badge_icon: 'Water Expert' },
-          { rank: 6, username: 'Alex Dupont', score: 10, zone: 'Zone A', badge_icon: 'Problem Solver' },
-          { rank: 7, username: 'Kenji Sato', score: 8, zone: 'Zone C', badge_icon: 'First Responder' },
-        ];
-      } else if (activeType === 'most_verified') {
-        mockList = [
-          { rank: 1, username: 'Kenji Sato', score: 94, zone: 'Zone C', rating: 125 },
-          { rank: 2, username: 'Elena Rostova', score: 87, zone: 'Zone A', rating: 110 },
-          { rank: 3, username: 'Aria Sterling', score: 65, zone: 'Zone A', rating: 105 },
-          { rank: 4, username: 'David K.', score: 48, zone: 'Zone C', rating: 98 },
-          { rank: 5, username: 'Marcus Vance', score: 42, zone: 'Zone B', rating: 95 },
-          { rank: 6, username: 'Priya Sharma', score: 35, zone: 'Zone B', rating: 92 },
-        ];
-      } else {
-        mockList = [
-          { rank: 1, department_name: 'Water Board', avg_resolution_time: '2.5 Hours', score: 98 },
-          { rank: 2, department_name: 'Roads & Highways', avg_resolution_time: '4.1 Hours', score: 88 },
-          { rank: 3, department_name: 'Public Sanitation', avg_resolution_time: '6.2 Hours', score: 79 },
-          { rank: 4, department_name: 'Power & Electricity', avg_resolution_time: '8.5 Hours', score: 68 },
-        ];
-      }
-
-      if (selectedZone !== 'all') {
-        mockList = mockList.filter(e => e.zone === selectedZone);
-      }
-      // Re-map ranks after filtering
-      mockList = mockList.map((e, idx) => ({ ...e, rank: idx + 1 }));
-
-      setEntries(mockList);
+      console.error("Failed fetching live leaderboard:", err);
+      toast.error("Failed to load leaderboard data from the live database.");
+      setEntries([]);
     } finally {
       setLoading(false);
     }

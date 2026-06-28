@@ -58,6 +58,7 @@ interface Issue {
   escalation_level: number;
   created_at: string;
   assigned_to?: string;
+  is_duplicate_of?: string;
 }
 
 export default function IssueDetail() {

@@ -84,13 +84,6 @@ export default function Admin() {
   const [reopenImage, setReopenImage] = useState('');
   const [isReopening, setIsReopening] = useState(false);
 
-  // --- Preselected realistic resolution preview photos for simulation ---
-  const resolvedSamplePhotos = [
-    { name: 'Road Resurfaced', url: 'https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&q=80&w=800' },
-    { name: 'Water Pipe Replaced', url: 'https://images.unsplash.com/photo-1581094288338-2314dddb7ecc?auto=format&fit=crop&q=80&w=800' },
-    { name: 'Sanitation Cleared', url: 'https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?auto=format&fit=crop&q=80&w=800' },
-  ];
-
   // 1. Live listener for issues from Firestore
   useEffect(() => {
     const unsubIssues = onSnapshot(collection(db, 'issues'), (snapshot) => {
@@ -118,26 +111,13 @@ export default function Admin() {
         list.push({ id: doc.id, ...doc.data() } as StaffMember);
       });
 
-      // Seed mock staff members if database is currently empty to prevent a blank slate
-      if (list.length === 0 && !loading) {
-        const seedStaff: Omit<StaffMember, 'id'>[] = [
-          { name: 'Officer Carlos Mendez', email: 'carlos.m@city.gov', role: 'Road Inspector', department: 'Department of Transportation', status: 'On Duty', active_assignments: 2, resolved_count: 14, performance_score: 4.8 },
-          { name: 'Engineer Maya Lin', email: 'maya.l@city.gov', role: 'Hydraulic Tech', department: 'Water Board', status: 'On Duty', active_assignments: 1, resolved_count: 22, performance_score: 4.9 },
-          { name: 'Inspector James Sterling', email: 'james.s@city.gov', role: 'Sanitation Chief', department: 'Public Sanitation', status: 'On Duty', active_assignments: 3, resolved_count: 9, performance_score: 4.4 },
-        ];
-        seedStaff.forEach(async (member) => {
-          const fakeId = 'staff_' + Math.random().toString(36).substr(2, 9);
-          await setDoc(doc(db, 'staff', fakeId), member);
-        });
-      }
-
       setStaff(list);
     }, (err) => {
       console.error("Firestore staff load failed:", err);
     });
 
     return () => unsubStaff();
-  }, [loading]);
+  }, []);
 
   // 3. Fetch admin notes / internal log comments for selected issue
   useEffect(() => {
@@ -394,7 +374,7 @@ export default function Admin() {
       const issueRef = doc(db, 'issues', selectedIssue.issue_id);
       const updatedUrls = [...(selectedIssue.image_urls || []), reopenImage];
       const updateObj = {
-        status: 'reported',
+        status: 'reported' as const,
         image_urls: updatedUrls,
         updated_at: new Date().toISOString()
       };
@@ -980,20 +960,6 @@ export default function Admin() {
                           ) : (
                             <div className="p-4 text-center space-y-1.5 text-slate-400">
                               <span className="text-xs italic block">Pending Resolution Photo</span>
-                              {selectedIssue.status !== 'resolved' && (
-                                <div className="flex flex-col gap-1.5 pt-1.5">
-                                  {resolvedSamplePhotos.map((p, i) => (
-                                    <button
-                                      key={i}
-                                      onClick={() => handleUploadResolutionPhoto(p.url)}
-                                      disabled={uploadingPhoto}
-                                      className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-[9px] font-bold hover:bg-slate-50 transition-colors cursor-pointer"
-                                    >
-                                      Simulate: {p.name}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
                             </div>
                           )}
                         </div>
@@ -1081,7 +1047,7 @@ export default function Admin() {
                             <Play className="w-3.5 h-3.5" /> Start Inspection
                           </button>
                         )}
-                        {(selectedIssue.status === 'reported' || selectedIssue.status === 'investigating' || selectedIssue.status === 'Assigned' || selectedIssue.status === 'assigned') && (
+                        {(selectedIssue.status === 'reported' || selectedIssue.status === 'investigating') && (
                           <button
                             onClick={() => handleStatusChange('resolving')}
                             className="w-full h-10 bg-transparent hover:bg-teal-50 border-2 border-teal-500 text-teal-600 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
@@ -1135,25 +1101,6 @@ export default function Admin() {
                               >
                                 <Camera className="w-3.5 h-3.5 text-slate-500" /> Upload Fix Image File
                               </label>
-                              
-                              <div className="text-[9px] text-slate-400 text-center font-bold uppercase tracking-wider">— OR select preset below —</div>
-                              
-                              <div className="grid grid-cols-3 gap-1">
-                                {resolvedSamplePhotos.map((p, i) => (
-                                  <button
-                                    key={i}
-                                    onClick={() => {
-                                      handleUploadResolutionPhoto(p.url);
-                                      toast.success(`Fix image selected: ${p.name}`);
-                                    }}
-                                    disabled={uploadingPhoto}
-                                    className="px-1 py-1 bg-white border border-slate-200 rounded-lg text-[9px] font-bold hover:bg-slate-50 transition-colors cursor-pointer text-slate-700 truncate"
-                                    title={p.name}
-                                  >
-                                    {p.name.split(' ')[0]}
-                                  </button>
-                                ))}
-                              </div>
                             </div>
                           )}
                         </div>

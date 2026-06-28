@@ -1008,7 +1008,7 @@ export default function Report() {
               </h3>
               <button
                 type="button"
-                onClick={handleGPSDetect}
+                onClick={() => handleGPSDetect(false)}
                 disabled={gpsLoading}
                 className="p-1.5 text-slate-400 hover:text-navy hover:bg-slate-50 rounded-lg transition-all"
                 title="Detect GPS Position"

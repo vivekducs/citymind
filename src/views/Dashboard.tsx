@@ -123,7 +123,7 @@ export default function Dashboard() {
 
   // Status computation
   const totalIssues = issues.length;
-  const resolvedIssues = issues.filter(i => i.status === 'resolved' || i.status === 'closed').length;
+  const resolvedIssues = issues.filter(i => i.status === 'resolved').length;
   const resolvedRate = totalIssues > 0 ? Math.round((resolvedIssues / totalIssues) * 100) : 0;
   
   const verifiedIssues = issues.filter(i => i.verification_percentage >= 50).length;
