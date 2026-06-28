@@ -3,10 +3,13 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import cors from 'cors';
+import helmet from 'helmet';
 
 import apiRouter from './server/routes/index';
 import { requestLogger } from './server/middleware/logger.middleware';
 import { errorHandler } from './server/middleware/error.middleware';
+import { customRateLimiter, inputSanitizer, requestSizeValidator } from './server/middleware/security.middleware';
 
 dotenv.config();
 
@@ -16,9 +19,29 @@ const PORT = 3000;
 async function bootstrap() {
   const app = express();
   
-  // Basic configuration
+  // Security configuration: Helmet & CORS
+  app.use(helmet({
+    contentSecurityPolicy: false, // Turn off CSP so that local iframe/Vite HMR/Google fonts load cleanly in AI Studio
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  }));
+  app.use(cors({
+    origin: '*',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  }));
+
+  // Limit request sizes to prevent denial of service (DoS)
+  app.use(requestSizeValidator(50 * 1024 * 1024)); // 50MB
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // Sanitize all incoming parameters against basic XSS vectors
+  app.use(inputSanitizer);
+
+  // Apply a dynamic lightweight in-memory rate limiter to public API endpoints
+  app.use('/api', customRateLimiter(200, 60 * 1000)); // 200 requests/minute limit per IP
 
   // Ensure uploads directory exists
   const uploadsDir = path.join(process.cwd(), 'uploads');
