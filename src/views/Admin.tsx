@@ -31,12 +31,14 @@ import {
   Layers,
   RefreshCw,
   AlertCircle,
-  X
+  X,
+  Brain
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { apiFetch } from '../api';
 import { toast } from 'react-hot-toast';
+import PredictiveGovernanceHub from '../components/PredictiveGovernanceHub';
 
 interface StaffMember {
   id: string;
@@ -54,7 +56,15 @@ export default function Admin() {
   const { user } = useAuth();
   const { issues, setIssues } = useIssueStore();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'queue' | 'staff'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'staff' | 'analytics' | 'twin'>('queue');
+
+  // --- Phase 4 Operations States ---
+  const [copilotData, setCopilotData] = useState<any>(null);
+  const [loadingCopilot, setLoadingCopilot] = useState<boolean>(false);
+  const [verificationResult, setVerificationResult] = useState<any>(null);
+  const [verifyingResolution, setVerifyingResolution] = useState<boolean>(false);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState<boolean>(false);
 
   // --- Filter and pagination states for Queue ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -75,6 +85,7 @@ export default function Admin() {
 
   // --- Selected Issue Detail Overlay Modal ---
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [modalSubTab, setModalSubTab] = useState<'details' | 'copilot' | 'verification'>('details');
   const [assignedStaffId, setAssignedStaffId] = useState('');
   const [progressNote, setProgressNote] = useState('');
   const [adminNotes, setAdminNotes] = useState<{ id: string; text: string; created_at: string }[]>([]);
@@ -83,6 +94,13 @@ export default function Admin() {
   const [reopenReason, setReopenReason] = useState('');
   const [reopenImage, setReopenImage] = useState('');
   const [isReopening, setIsReopening] = useState(false);
+
+  // Auto-reset modal sub-tab when selectedIssue changes
+  useEffect(() => {
+    if (!selectedIssue) {
+      setModalSubTab('details');
+    }
+  }, [selectedIssue]);
 
   // 1. Live listener for issues from Firestore
   useEffect(() => {
@@ -142,6 +160,105 @@ export default function Admin() {
 
     return () => unsubNotes();
   }, [selectedIssue]);
+
+  // --- Phase 4 Operations Side-Effects and Helpers ---
+
+  const triggerVerification = async (photoUrl: string) => {
+    if (!selectedIssue) return;
+    setVerifyingResolution(true);
+    try {
+      const res = await apiFetch(`/api/admin/issues/${selectedIssue.issue_id}/verify-resolution`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolvedImage: photoUrl })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVerificationResult(data.verification);
+        toast.success("AI Resolution Verification complete!");
+      } else {
+        toast.error("AI Verification failed.");
+      }
+    } catch (err) {
+      console.error("Verification failed:", err);
+    } finally {
+      setVerifyingResolution(false);
+    }
+  };
+
+  const handleRegenerateCopilot = async () => {
+    if (!selectedIssue) return;
+    setLoadingCopilot(true);
+    try {
+      const res = await apiFetch(`/api/admin/issues/${selectedIssue.issue_id}/officer-copilot`);
+      if (res.ok) {
+        const data = await res.json();
+        setCopilotData(data);
+        toast.success("Copilot strategies regenerated successfully!");
+      }
+    } catch (err) {
+      console.error("Regenerate failed:", err);
+    } finally {
+      setLoadingCopilot(false);
+    }
+  };
+
+  // Fetch Officer Copilot Recommendations when selectedIssue is chosen
+  useEffect(() => {
+    if (!selectedIssue) {
+      setCopilotData(null);
+      setVerificationResult(null);
+      return;
+    }
+
+    const fetchCopilotData = async () => {
+      setLoadingCopilot(true);
+      try {
+        const res = await apiFetch(`/api/admin/issues/${selectedIssue.issue_id}/officer-copilot`);
+        if (res.ok) {
+          const data = await res.json();
+          setCopilotData(data);
+        } else {
+          toast.error("Failed to load AI Officer Copilot recommendations.");
+        }
+      } catch (err) {
+        console.error("Failed to fetch copilot data:", err);
+      } finally {
+        setLoadingCopilot(false);
+      }
+    };
+
+    fetchCopilotData();
+
+    // Trigger verification automatically if resolved photo exists
+    if (selectedIssue.before_after_photos && selectedIssue.before_after_photos.length > 0) {
+      triggerVerification(selectedIssue.before_after_photos[0]);
+    }
+  }, [selectedIssue]);
+
+  // Fetch live Operations Analytics
+  useEffect(() => {
+    if (activeTab !== 'analytics') return;
+
+    const fetchAnalytics = async () => {
+      setLoadingAnalytics(true);
+      try {
+        const res = await apiFetch('/api/admin/operations-analytics');
+        if (res.ok) {
+          const data = await res.json();
+          setAnalyticsData(data.analytics);
+        } else {
+          toast.error("Failed to load operations analytics.");
+        }
+      } catch (err) {
+        console.error("Failed to fetch analytics:", err);
+      } finally {
+        setLoadingAnalytics(false);
+      }
+    };
+
+    fetchAnalytics();
+  }, [activeTab]);
 
   // If user is not logged in or doesn't have authority flag, show Access Denied
   if (!user || !user.is_authority) {
@@ -553,6 +670,24 @@ export default function Admin() {
           <Users className="w-4 h-4" />
           Staff Registry ({staff.length})
         </button>
+        <button
+          onClick={() => setActiveTab('analytics')}
+          className={`px-6 py-3.5 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-2 cursor-pointer ${
+            activeTab === 'analytics' ? 'border-navy text-navy font-bold' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          AI Operations Analytics
+        </button>
+        <button
+          onClick={() => setActiveTab('twin')}
+          className={`px-6 py-3.5 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-2 cursor-pointer ${
+            activeTab === 'twin' ? 'border-navy text-navy font-bold' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Brain className="w-4 h-4" />
+          Digital Twin & Predictive Hub
+        </button>
       </div>
 
       {/* 4. Active Tab content render */}
@@ -878,6 +1013,165 @@ export default function Admin() {
             </div>
           </motion.div>
         )}
+
+        {activeTab === 'analytics' && (
+          <motion.div
+            key="analytics-pane"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8 text-xs"
+          >
+            {loadingAnalytics && !analyticsData ? (
+              <div className="p-20 text-center space-y-4">
+                <RefreshCw className="w-8 h-8 text-saffron animate-spin mx-auto" />
+                <p className="text-sm font-bold text-slate-500 animate-pulse">Retrieving operational stats and generating real-time city workloads...</p>
+              </div>
+            ) : analyticsData ? (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8" id="operations-analytics-dashboard">
+                {/* Left Column: Department Performance Index */}
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900">Department Workloads & Service Standards</h3>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Real-time telemetry of department efficiency and average resolution SLAs.</p>
+                      </div>
+                      <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 font-extrabold text-[10px] uppercase rounded-full tracking-wider">
+                        Active SLA: {analyticsData.slaTrendPercentage}%
+                      </span>
+                    </div>
+
+                    <div className="space-y-4">
+                      {analyticsData.departmentPerformance.map((dept: any, idx: number) => (
+                        <div key={idx} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-slate-900">{dept.department}</h4>
+                            <div className="flex items-center gap-3 text-[10px] text-slate-400 font-medium">
+                              <span>Active Tickets: <b className="text-navy">{dept.workloadCount}</b></span>
+                              <span>•</span>
+                              <span>Avg Resolution: <b className="text-slate-600">{dept.averageSlaHours} Hours</b></span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-4 shrink-0">
+                            <div className="text-right space-y-1">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase">Efficiency Index</p>
+                              <p className="font-extrabold text-emerald-600 text-sm">{dept.efficiencyIndex}%</p>
+                            </div>
+                            <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500" style={{ width: `${dept.efficiencyIndex}%` }} />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Repeated Failures & Hotspot detection */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">🔥 AI Hotspot & Failure Recurrence Warnings</h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Autonomous cluster detection of recurring public infrastructure damage and utility vulnerabilities.</p>
+                    </div>
+
+                    <div className="divide-y divide-slate-100">
+                      {analyticsData.repeatedFailuresHotspots.map((hotspot: any, idx: number) => (
+                        <div key={idx} className="py-3.5 flex justify-between items-start gap-4">
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-slate-900">{hotspot.location}</h4>
+                            <p className="text-[10px] text-slate-500 font-mono">{hotspot.failureType}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="px-2 py-0.5 bg-red-50 text-red-700 border border-red-100 rounded text-[10px] font-bold">
+                              {hotspot.count} Times
+                            </span>
+                            <p className="text-[10px] text-slate-400 font-bold mt-1">Est. Cost: {hotspot.avgBudget}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Key Alerts, Preventive Maintenance & Budget metrics */}
+                <div className="space-y-6">
+                  {/* High Value KPI summary card */}
+                  <div className="p-6 bg-navy text-white rounded-3xl space-y-4 border border-navy shadow-lg relative overflow-hidden">
+                    <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 w-20 h-20 rounded-full bg-saffron/10 shrink-0"></div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-saffron tracking-wider">Operational Summary</p>
+                      <h3 className="text-xl font-extrabold mt-1 text-slate-100">Smart Grid Efficiency</h3>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-2">
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                        <p className="text-[10px] text-slate-300">Active Tasks</p>
+                        <h4 className="text-lg font-black mt-1">{analyticsData.totalActiveWorkOrders}</h4>
+                      </div>
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                        <p className="text-[10px] text-slate-300">Hotspot Zones</p>
+                        <h4 className="text-lg font-black mt-1">{analyticsData.repeatedFailuresHotspots.length}</h4>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI Preventive Maintenance Recommendations */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">🛡️ AI Preventive Maintenance Guides</h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Pre-emptive repair schedules suggested to reduce emergency breakdown incidents.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      {analyticsData.preventiveMaintenanceZones.map((pm: any, idx: number) => (
+                        <div key={idx} className="p-3.5 bg-amber-50/50 border border-amber-100 rounded-2xl space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-slate-600 line-clamp-1">{pm.zone}</span>
+                            <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-black text-[9px]">
+                              {pm.priority}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-medium">{pm.action}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Expensive Repairs tracking */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                    <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider text-slate-400">High-Cost Repairs Detected</h3>
+                    <div className="space-y-2">
+                      {analyticsData.mostExpensiveRepairs.map((repair: any, idx: number) => (
+                        <div key={idx} className="flex justify-between items-center text-[11px]">
+                          <div>
+                            <p className="font-bold text-slate-800">{repair.title}</p>
+                            <p className="text-[10px] text-slate-400">{repair.department}</p>
+                          </div>
+                          <span className="font-black text-slate-950 font-mono">{repair.cost}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-16 text-center text-slate-400 font-semibold">
+                No telemetry statistics compiled. Check back soon.
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {activeTab === 'twin' && (
+          <motion.div
+            key="twin-pane"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <PredictiveGovernanceHub />
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* 5. Comprehensive Action Overlay Dialog */}
@@ -909,89 +1203,470 @@ export default function Admin() {
                 </button>
               </div>
 
+              {/* Modal Sub-Tabs */}
+              <div className="flex bg-slate-100 p-1.5 gap-1 shrink-0 border-b border-slate-200">
+                <button
+                  onClick={() => setModalSubTab('details')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    modalSubTab === 'details' ? 'bg-white text-navy shadow-sm border border-slate-200/10' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Citizen Info & Logs
+                </button>
+                <button
+                  onClick={() => setModalSubTab('copilot')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    modalSubTab === 'copilot' ? 'bg-white text-navy shadow-sm border border-slate-200/10' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  ✨ AI Officer Copilot
+                </button>
+                <button
+                  onClick={() => setModalSubTab('verification')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    modalSubTab === 'verification' ? 'bg-white text-navy shadow-sm border border-slate-200/10' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  🔍 AI Photo Verification
+                </button>
+              </div>
+
               {/* Scrollable Layout Content */}
               <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-12 gap-6">
-                
-                {/* Left Side: General Info & Before/After Gallery */}
+                  {/* Left Side: General Info, AI Copilot, or Resolution Verification depending on modalSubTab */}
                 <div className="md:col-span-7 space-y-6">
                   
-                  {/* Detailed summary */}
-                  <div className="space-y-3 bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Report Description</h4>
-                    <p className="text-xs text-slate-700 leading-relaxed">{selectedIssue.description || 'No descriptive text was attached by the reporter.'}</p>
-                    
-                    <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-200/60 text-xs text-slate-600">
-                      <div>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase">Department In-Charge</p>
-                        <p className="font-bold text-slate-800 mt-1">{selectedIssue.department}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase">Location Geocode</p>
-                        <p className="font-mono text-slate-800 mt-1">{selectedIssue.location.lat.toFixed(5)}, {selectedIssue.location.lng.toFixed(5)}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Before & After Photo Gallery Comparison */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <Camera className="w-4 h-4 text-slate-500" />
-                      Before & After Repair Documentation
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      {/* Before Photo */}
-                      <div className="space-y-2">
-                        <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider block">Before (Incident Reported)</span>
-                        <div className="aspect-video w-full rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 shadow-inner relative flex items-center justify-center">
-                          {selectedIssue.image_urls?.[0] ? (
-                            <img src={selectedIssue.image_urls[0]} alt="Before repair" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-xs text-slate-400 italic">No image submitted</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* After Photo */}
-                      <div className="space-y-2">
-                        <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block">After (Municipal Resolution)</span>
-                        <div className="aspect-video w-full rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 shadow-inner relative flex items-center justify-center">
-                          {selectedIssue.before_after_photos?.[0] ? (
-                            <img src={selectedIssue.before_after_photos[0]} alt="After repair" referrerPolicy="no-referrer" className="w-full h-full object-cover animate-fade-in" />
-                          ) : (
-                            <div className="p-4 text-center space-y-1.5 text-slate-400">
-                              <span className="text-xs italic block">Pending Resolution Photo</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Dynamic internal log notes list */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <MessageSquare className="w-4 h-4 text-slate-500" />
-                      Internal Progress Log
-                    </h4>
-
-                    {loadingNotes ? (
-                      <div className="animate-pulse space-y-2">
-                        <div className="h-4 bg-slate-100 rounded"></div>
-                        <div className="h-4 bg-slate-100 rounded"></div>
-                      </div>
-                    ) : adminNotes.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">No internal municipal progress logs added yet.</p>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {adminNotes.map((note) => (
-                          <div key={note.id} className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1 text-xs">
-                            <p className="text-slate-700 leading-relaxed font-medium">{note.text}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">{new Date(note.created_at).toLocaleString()}</p>
+                  {modalSubTab === 'details' && (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Detailed summary */}
+                      <div className="space-y-3 bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Report Description</h4>
+                        <p className="text-xs text-slate-700 leading-relaxed">{selectedIssue.description || 'No descriptive text was attached by the reporter.'}</p>
+                        
+                        <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-200/60 text-xs text-slate-600">
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase">Department In-Charge</p>
+                            <p className="font-bold text-slate-800 mt-1">{selectedIssue.department}</p>
                           </div>
-                        ))}
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase">Location Geocode</p>
+                            <p className="font-mono text-slate-800 mt-1">{selectedIssue.location.lat.toFixed(5)}, {selectedIssue.location.lng.toFixed(5)}</p>
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </div>
+
+                      {/* Before & After Photo Gallery Comparison */}
+                      <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <Camera className="w-4 h-4 text-slate-500" />
+                          Before & After Repair Documentation
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          {/* Before Photo */}
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider block">Before (Incident Reported)</span>
+                            <div className="aspect-video w-full rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 shadow-inner relative flex items-center justify-center">
+                              {selectedIssue.image_urls?.[0] ? (
+                                <img src={selectedIssue.image_urls[0]} alt="Before repair" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-xs text-slate-400 italic">No image submitted</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* After Photo */}
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block">After (Municipal Resolution)</span>
+                            <div className="aspect-video w-full rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 shadow-inner relative flex items-center justify-center">
+                              {selectedIssue.before_after_photos?.[0] ? (
+                                <img src={selectedIssue.before_after_photos[0]} alt="After repair" referrerPolicy="no-referrer" className="w-full h-full object-cover animate-fade-in" />
+                              ) : (
+                                <div className="p-4 text-center space-y-1.5 text-slate-400">
+                                  <span className="text-xs italic block">Pending Resolution Photo</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Dynamic internal log notes list */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <MessageSquare className="w-4 h-4 text-slate-500" />
+                          Internal Progress Log
+                        </h4>
+
+                        {loadingNotes ? (
+                          <div className="animate-pulse space-y-2">
+                            <div className="h-4 bg-slate-100 rounded"></div>
+                            <div className="h-4 bg-slate-100 rounded"></div>
+                          </div>
+                        ) : adminNotes.length === 0 ? (
+                          <p className="text-xs text-slate-400 italic">No internal municipal progress logs added yet.</p>
+                        ) : (
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {adminNotes.map((note) => (
+                              <div key={note.id} className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1 text-xs">
+                                <p className="text-slate-700 leading-relaxed font-medium">{note.text}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">{new Date(note.created_at).toLocaleString()}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {modalSubTab === 'copilot' && (
+                    <div className="space-y-6 animate-fade-in">
+                      {loadingCopilot && !copilotData ? (
+                        <div className="p-16 text-center space-y-4">
+                          <RefreshCw className="w-7 h-7 text-saffron animate-spin mx-auto" />
+                          <p className="text-sm font-bold text-slate-500">Querying CityMind agent registry for optimal response dispatch models...</p>
+                        </div>
+                      ) : copilotData ? (
+                        <div className="space-y-6">
+                          
+                          {/* 1. Header with recalculate action */}
+                          <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-200/50">
+                            <div>
+                              <h4 className="text-xs font-bold text-navy uppercase tracking-wider">AI Copilot Analysis Strategy</h4>
+                              <p className="text-[10px] text-slate-400 mt-0.5">Synthesized response strategies, required resource plans, and worker procedures.</p>
+                            </div>
+                            <button
+                              onClick={handleRegenerateCopilot}
+                              className="h-8 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1 cursor-pointer"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              Recalculate
+                            </button>
+                          </div>
+
+                          {/* 2. Summary & Severity explanation */}
+                          <div className="space-y-3 p-5 bg-navy text-white rounded-2xl">
+                            <div>
+                              <p className="text-[10px] font-black text-saffron uppercase tracking-wider">Executive Summary</p>
+                              <p className="text-[11px] leading-relaxed text-slate-100 mt-1">{copilotData.copilot.executiveSummary}</p>
+                            </div>
+                            <div className="pt-3 border-t border-white/10">
+                              <p className="text-[10px] font-black text-saffron uppercase tracking-wider">Severity Risk Factors</p>
+                              <p className="text-[11px] leading-relaxed text-slate-200 mt-1">{copilotData.copilot.severityExplanation}</p>
+                            </div>
+                          </div>
+
+                          {/* 3. WORK ORDER GENERATOR (Feature 2) */}
+                          <div className="border border-slate-200 rounded-2xl bg-white overflow-hidden shadow-sm">
+                            <div className="bg-slate-900 p-4 flex justify-between items-center text-white shrink-0">
+                              <div>
+                                <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-saffron">OFFICIAL DISPATCH WORK ORDER</h4>
+                                <p className="text-[10px] font-mono text-slate-400 mt-0.5">ORDER ID: {copilotData.workOrder.workOrderId}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(copilotData.workOrder, null, 2))}`;
+                                    const downloadAnchor = document.createElement('a');
+                                    downloadAnchor.setAttribute('href', jsonString);
+                                    downloadAnchor.setAttribute('download', `work_order_${copilotData.workOrder.workOrderId}.json`);
+                                    document.body.appendChild(downloadAnchor);
+                                    downloadAnchor.click();
+                                    downloadAnchor.remove();
+                                    toast.success("Work Order exported as JSON!");
+                                  }}
+                                  className="h-7 px-2.5 bg-white/10 hover:bg-white/20 text-white rounded font-bold text-[10px] transition-all cursor-pointer"
+                                >
+                                  Export JSON
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const w = window.open('', '_blank');
+                                    if (w) {
+                                      w.document.write(`
+                                        <html>
+                                          <head>
+                                            <title>Work Order - ${copilotData.workOrder.workOrderId}</title>
+                                            <style>
+                                              body { font-family: monospace; padding: 40px; line-height: 1.6; }
+                                              .header { border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 20px; }
+                                              .section { margin-bottom: 20px; }
+                                              .label { font-weight: bold; text-transform: uppercase; color: #555; }
+                                            </style>
+                                          </head>
+                                          <body>
+                                            <div class="header">
+                                              <h2>CITYMIND SMART WORK ORDER</h2>
+                                              <p>GENERATED ON: ${new Date().toLocaleString()}</p>
+                                              <p>ORDER ID: ${copilotData.workOrder.workOrderId}</p>
+                                            </div>
+                                            <div class="section">
+                                              <div class="label">Priority Rating:</div>
+                                              <div>${copilotData.workOrder.priority}</div>
+                                            </div>
+                                            <div class="section">
+                                              <div class="label">Incident Summary:</div>
+                                              <div>${copilotData.workOrder.issueSummary}</div>
+                                            </div>
+                                            <div class="section">
+                                              <div class="label">GPS Coordinates:</div>
+                                              <div>${copilotData.workOrder.gpsCoordinates}</div>
+                                            </div>
+                                            <div class="section">
+                                              <div class="label">Department:</div>
+                                              <div>${copilotData.workOrder.department}</div>
+                                            </div>
+                                            <div class="section">
+                                              <div class="label">Assigned Crew:</div>
+                                              <div>${copilotData.workOrder.crewAssignment}</div>
+                                            </div>
+                                            <div class="section">
+                                              <div class="label">Estimated Material Cost & Duration:</div>
+                                              <div>${copilotData.workOrder.estimatedCost} / ${copilotData.workOrder.estimatedDuration}</div>
+                                            </div>
+                                            <div class="section">
+                                              <div class="label">Worker Safety Directives:</div>
+                                              <div>${copilotData.workOrder.safetyInstructions}</div>
+                                            </div>
+                                            <script>window.print();</script>
+                                          </body>
+                                        </html>
+                                      `);
+                                      w.document.close();
+                                    }
+                                  }}
+                                  className="h-7 px-2.5 bg-saffron hover:bg-saffron-hover text-slate-900 rounded font-bold text-[10px] transition-all cursor-pointer"
+                                >
+                                  Print Slip
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="p-5 space-y-4 text-[11px] text-slate-700 font-medium">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase">Assigned Unit</p>
+                                  <p className="font-bold text-slate-800 mt-0.5">{copilotData.workOrder.crewAssignment}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase">Estimated Duration</p>
+                                  <p className="font-bold text-slate-800 mt-0.5">{copilotData.workOrder.estimatedDuration}</p>
+                                </div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-100">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">Required Equipment</p>
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                  {copilotData.workOrder.requiredEquipment.map((eq: string, idx: number) => (
+                                    <span key={idx} className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-[10px] font-bold text-slate-600">{eq}</span>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="pt-2 border-t border-slate-100">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">Safety instructions</p>
+                                <p className="text-slate-600 mt-0.5">{copilotData.workOrder.safetyInstructions}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 4. Smart Crew & Asset Assignment (Feature 3) */}
+                          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                            <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1">
+                              🚒 Smart Crew & Vehicle Dispatch Recommendation
+                            </h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[11px] text-slate-600 font-medium">
+                              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">Dispatched Roster Team</p>
+                                <p className="font-bold text-slate-900">{copilotData.crew.crew}</p>
+                                <p className="text-[10px] text-slate-500">Lead: {copilotData.crew.officer}</p>
+                              </div>
+                              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">Service Vehicle Assigned</p>
+                                <p className="font-bold text-slate-900">{copilotData.crew.vehicle}</p>
+                                <p className="text-[10px] text-slate-500">Status: En-Route ({copilotData.crew.estimatedArrival})</p>
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-emerald-600 font-bold bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+                              ⚖️ Workload Balance: {copilotData.crew.workloadBalancingFactor}
+                            </p>
+                          </div>
+
+                          {/* 5. Resource Planning & Cost Estimator (Feature 4) */}
+                          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                            <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1">
+                              📊 Itemized Resource & Materials Cost Estimator
+                            </h4>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-[11px] font-medium text-slate-600">
+                                <thead>
+                                  <tr className="border-b border-slate-100 text-[9px] text-slate-400 uppercase font-bold">
+                                    <th className="py-2">Material / Role</th>
+                                    <th className="py-2">Quantity</th>
+                                    <th className="py-2 text-right">Estimated Cost</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {copilotData.resources.materials.map((m: any, idx: number) => (
+                                    <tr key={idx} className="py-2">
+                                      <td className="py-2 font-bold text-slate-800">{m.item}</td>
+                                      <td className="py-2">{m.quantity}</td>
+                                      <td className="py-2 text-right font-black text-slate-950 font-mono">{m.cost}</td>
+                                    </tr>
+                                  ))}
+                                  {copilotData.resources.labor.map((l: any, idx: number) => (
+                                    <tr key={idx} className="py-2">
+                                      <td className="py-2 font-bold text-slate-800">{l.role}</td>
+                                      <td className="py-2">{l.quantity} Workers</td>
+                                      <td className="py-2 text-right font-black text-slate-950 font-mono">{l.cost}</td>
+                                    </tr>
+                                  ))}
+                                  <tr className="border-t-2 border-slate-900 py-2">
+                                    <td className="py-3 font-extrabold text-navy uppercase text-[10px]">Grand Total Budget</td>
+                                    <td className="py-3"></td>
+                                    <td className="py-3 text-right font-black text-emerald-600 text-xs font-mono">{copilotData.resources.budgetBreakdown.grandTotal}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                            <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-100 space-y-1">
+                              <span className="text-[10px] font-bold text-amber-800">Risk Assessment Indicator: {copilotData.resources.riskLevel}</span>
+                              <p className="text-[10px] text-slate-500 leading-relaxed">{copilotData.resources.riskExplanation}</p>
+                            </div>
+                          </div>
+
+                          {/* 6. Smart Resolution Suggestions (Feature 7) */}
+                          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                            <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1">
+                              💡 Smart Resolution suggestions & Preventive Actions
+                            </h4>
+                            <div className="space-y-2 text-[11px] text-slate-600 font-medium">
+                              <p className="text-slate-700 leading-relaxed"><b className="text-slate-900">Recommended Resolution Plan:</b></p>
+                              <ol className="list-decimal list-inside space-y-1 pl-1 text-[11px]">
+                                {copilotData.copilot.recommendedResolutionPlan.map((step: string, idx: number) => (
+                                  <li key={idx} className="text-slate-600 leading-relaxed">{step}</li>
+                                ))}
+                              </ol>
+                              <div className="pt-2 border-t border-slate-100 text-[10px]">
+                                <span className="text-slate-400 font-bold uppercase block">Neighborhood Citizen Impact:</span>
+                                <p className="text-slate-600 leading-relaxed mt-0.5">{copilotData.copilot.expectedCitizenImpact}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 7. OFFICER TIMELINE (Feature 6, 9) */}
+                          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+                            <h4 className="text-xs font-bold text-slate-900">
+                              ⏰ Autonomous Operations Dispatch Timeline
+                            </h4>
+                            <div className="relative border-l-2 border-slate-100 ml-3.5 space-y-6 text-[11px]">
+                              {copilotData.timelineSteps.map((step: any, idx: number) => (
+                                <div key={idx} className="relative pl-6">
+                                  <div className="absolute -left-[7px] top-0.5 w-3.5 h-3.5 rounded-full bg-navy border-2 border-white shrink-0" />
+                                  <div className="space-y-0.5">
+                                    <div className="flex justify-between items-center">
+                                      <p className="font-extrabold text-slate-900">{step.label}</p>
+                                      <span className="text-[10px] text-slate-400 font-mono">{step.durationMs}ms</span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-500">Agent: <b className="text-navy">{step.agent}</b> ({step.confidence}% confidence)</p>
+                                    <p className="text-[9px] text-slate-400 font-mono">{new Date(step.timestamp).toLocaleString()}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                        </div>
+                      ) : (
+                        <div className="p-16 text-center text-slate-400 font-semibold">
+                          Failed to compile Copilot recommendation strategy.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {modalSubTab === 'verification' && (
+                    <div className="space-y-6 animate-fade-in">
+                      {verifyingResolution ? (
+                        <div className="p-20 text-center space-y-4">
+                          <RefreshCw className="w-8 h-8 text-saffron animate-spin mx-auto" />
+                          <p className="text-sm font-bold text-slate-500">Triggering Resolution Verification Swarm...</p>
+                        </div>
+                      ) : verificationResult ? (
+                        <div className="space-y-6">
+                          
+                          {/* 1. Decision Header Status */}
+                          <div className={`p-5 rounded-2xl border ${
+                            verificationResult.repairVerificationSuccess 
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                              : 'bg-red-50 border-red-100 text-red-800'
+                          }`}>
+                            <h4 className="text-sm font-black uppercase tracking-wider flex items-center gap-2">
+                              {verificationResult.repairVerificationSuccess ? '✅ Verification Approved' : '⚠️ Resolution Rejected'}
+                            </h4>
+                            <p className="text-[11px] leading-relaxed mt-2 text-slate-700">
+                              {verificationResult.detailedExplanation}
+                            </p>
+                          </div>
+
+                          {/* 2. Side-By-Side Comparison Display */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Before (Incident Damage)</span>
+                              <div className="aspect-video w-full rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 relative">
+                                {selectedIssue.image_urls?.[0] ? (
+                                  <img src={selectedIssue.image_urls[0]} alt="Original" referrerPolicy="no-referrer" className="w-full h-full object-cover animate-fade-in" />
+                                ) : (
+                                  <div className="absolute inset-0 flex items-center justify-center text-[10px] italic text-slate-400">No original image attached</div>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-500 font-mono bg-slate-50 p-2 rounded-xl border border-slate-100 leading-relaxed">
+                                <b>Damage Inspection:</b> {verificationResult.damageDetectedInOriginal}
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">After (Autonomous Resolution)</span>
+                              <div className="aspect-video w-full rounded-2xl overflow-hidden border border-slate-100 bg-slate-50 relative">
+                                {selectedIssue.before_after_photos?.[0] ? (
+                                  <img src={selectedIssue.before_after_photos[0]} alt="Resolved" referrerPolicy="no-referrer" className="w-full h-full object-cover animate-fade-in" />
+                                ) : (
+                                  <div className="absolute inset-0 flex items-center justify-center text-[10px] italic text-slate-400">No resolved image attached</div>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-500 font-mono bg-slate-50 p-2 rounded-xl border border-slate-100 leading-relaxed">
+                                <b>Resolution Certified:</b> {verificationResult.repairDetectedInResolved}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* 3. Verification Meter with Confidence Score */}
+                          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                            <div className="flex justify-between items-center">
+                              <p className="text-xs font-bold text-slate-900">AI Repair Trust & Calibration score</p>
+                              <span className="font-extrabold text-navy font-mono text-xs">{verificationResult.verificationConfidence}%</span>
+                            </div>
+                            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-100">
+                              <div 
+                                className={`h-full transition-all duration-500 ${
+                                  verificationResult.repairVerificationSuccess ? 'bg-emerald-500' : 'bg-red-500'
+                                }`}
+                                style={{ width: `${verificationResult.verificationConfidence}%` }} 
+                              />
+                            </div>
+                            <p className="text-[10px] text-slate-400">
+                              *Trust Calibration calculated dynamically by matching image structures, surrounding neighborhood depth, and asphalt compaction boundaries using the Google Gemini Vision API.
+                            </p>
+                          </div>
+
+                        </div>
+                      ) : (
+                        <div className="p-16 text-center text-slate-400 font-semibold space-y-3">
+                          <AlertCircle className="w-8 h-8 text-slate-300 mx-auto" />
+                          <h4 className="font-bold text-slate-800 text-sm">No verification data compiled</h4>
+                          <p className="text-xs max-w-xs mx-auto">Please upload a fix resolution photo in the actions panel first, or trigger verification to analyze repair compliance.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 </div>
 
                 {/* Right Side: State Machine Dispatch Actions */}

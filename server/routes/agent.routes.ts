@@ -12,4 +12,12 @@ router.get(['/dashboard/insights', '/api/dashboard/insights'], AgentController.g
 router.get(['/agents/registry', '/api/agents/registry'], AgentController.getRegistry);
 router.get(['/agents/logs', '/api/agents/logs'], AgentController.getLogs);
 
+// Phase 5 predictive intelligence & autonomous governance endpoints
+router.get(['/predictive/twin', '/api/predictive/twin'], AgentController.getTwinData);
+router.get(['/predictive/budget', '/api/predictive/budget'], AgentController.getBudgetOptimization);
+router.post(['/predictive/simulate', '/api/predictive/simulate'], AgentController.simulateDecision);
+router.get(['/predictive/briefing', '/api/predictive/briefing'], AgentController.getExecutiveBriefing);
+router.post(['/predictive/search', '/api/predictive/search'], AgentController.searchSemantic);
+router.get(['/predictive/community', '/api/predictive/community'], AgentController.getCommunityInsights);
+
 export default router;

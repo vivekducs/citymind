@@ -39,9 +39,11 @@ router.post(
 
 router.get(['/gamification/leaderboard', '/api/gamification/leaderboard'], AdminController.getLeaderboard);
 
-router.get(
-  ['/gamification/user-points/:user_id', '/api/gamification/user-points/:user_id'], 
-  AdminController.getUserPoints
-);
+router.get(['/gamification/user-points/:user_id', '/api/gamification/user-points/:user_id'], AdminController.getUserPoints);
+
+// Phase 4 - AI Operations Platform Endpoints
+router.get(['/admin/issues/:issue_id/officer-copilot', '/api/admin/issues/:issue_id/officer-copilot'], AdminController.getOfficerCopilotRecommendations);
+router.post(['/admin/issues/:issue_id/verify-resolution', '/api/admin/issues/:issue_id/verify-resolution'], AdminController.verifyResolution);
+router.get(['/admin/operations-analytics', '/api/admin/operations-analytics'], AdminController.getOperationsAnalytics);
 
 export default router;

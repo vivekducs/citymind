@@ -3,6 +3,24 @@ import { IngestionAgent } from './IngestionAgent';
 import { DuplicateDetectionAgent } from './DuplicateDetectionAgent';
 import { EscalationAgent } from './EscalationAgent';
 import { InsightsAgent } from './InsightsAgent';
+import { 
+  OfficerCopilotAgent, 
+  WorkOrderAgent, 
+  CrewAssignmentAgent, 
+  ResourcePlanningAgent, 
+  ResolutionVerificationAgent, 
+  OperationsAnalyticsAgent 
+} from './OfficerAgents';
+import {
+  PredictiveMaintenanceAgent,
+  BudgetOptimizationAgent,
+  EmergencyResponseAgent,
+  CityHealthAgent,
+  DecisionSimulationAgent,
+  ExecutiveBriefingAgent,
+  SemanticSearchAgent,
+  CommunityInsightsAgent
+} from './PredictiveAgents';
 
 export class AgentRegistry {
   private static instance: AgentRegistry;
@@ -14,6 +32,24 @@ export class AgentRegistry {
     this.register(new DuplicateDetectionAgent());
     this.register(new EscalationAgent());
     this.register(new InsightsAgent());
+
+    // Register Phase 4 agents
+    this.register(new OfficerCopilotAgent());
+    this.register(new WorkOrderAgent());
+    this.register(new CrewAssignmentAgent());
+    this.register(new ResourcePlanningAgent());
+    this.register(new ResolutionVerificationAgent());
+    this.register(new OperationsAnalyticsAgent());
+
+    // Register Phase 5 agents
+    this.register(new PredictiveMaintenanceAgent());
+    this.register(new BudgetOptimizationAgent());
+    this.register(new EmergencyResponseAgent());
+    this.register(new CityHealthAgent());
+    this.register(new DecisionSimulationAgent());
+    this.register(new ExecutiveBriefingAgent());
+    this.register(new SemanticSearchAgent());
+    this.register(new CommunityInsightsAgent());
   }
 
   public static getInstance(): AgentRegistry {

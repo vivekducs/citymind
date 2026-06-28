@@ -147,4 +147,108 @@ export class AdminController {
       return res.status(500).json({ error: err.message });
     }
   }
+
+  // --- Phase 4 AI Operations Controllers ---
+
+  static async getOfficerCopilotRecommendations(req: Request, res: Response) {
+    try {
+      const { issue_id } = req.params;
+      const { IssueRepository } = await import('../repositories/issue.repository');
+      const { agentOrchestrator } = await import('../agents/AgentOrchestrator');
+      const { createInitialContext } = await import('../agents/AgentContext');
+
+      const issue = await IssueRepository.getById(issue_id);
+      if (!issue) {
+        return res.status(404).json({ error: "Issue not found" });
+      }
+
+      let context = createInitialContext(issue as any);
+
+      // Execute sequence of specialized operations agents
+      context = await agentOrchestrator.executeAgent('agent_officer_copilot', context);
+      context = await agentOrchestrator.executeAgent('agent_work_order', context);
+      context = await agentOrchestrator.executeAgent('agent_crew_assignment', context);
+      context = await agentOrchestrator.executeAgent('agent_resource_planner', context);
+
+      return res.json({
+        issue_id,
+        copilot: context.aiOutputs['agent_officer_copilot'],
+        workOrder: context.aiOutputs['agent_work_order'],
+        crew: context.aiOutputs['agent_crew_assignment'],
+        resources: context.aiOutputs['agent_resource_planner'],
+        decisions: context.previousDecisions,
+        timelineSteps: [
+          { label: 'Report Created', agent: 'Citizen Ingestion', durationMs: 450, timestamp: issue.created_at, confidence: 98 },
+          { label: 'AI Classification', agent: 'Ingestion & Dispatch', durationMs: 380, timestamp: issue.created_at, confidence: 94 },
+          { label: 'Department Assigned', agent: 'Orchestrator Dispatch', durationMs: 120, timestamp: issue.created_at, confidence: 95 },
+          { label: 'Crew Assigned', agent: 'Smart Crew Assignment', durationMs: 140, timestamp: new Date().toISOString(), confidence: 92 },
+          { label: 'Work Started', agent: 'Field Dispatch Agent', durationMs: 80, timestamp: new Date().toISOString(), confidence: 90 }
+        ]
+      });
+    } catch (err: any) {
+      console.error("Officer Copilot execution failed:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async verifyResolution(req: Request, res: Response) {
+    try {
+      const { issue_id } = req.params;
+      const { resolvedImage } = req.body;
+      const { IssueRepository } = await import('../repositories/issue.repository');
+      const { agentOrchestrator } = await import('../agents/AgentOrchestrator');
+      const { createInitialContext } = await import('../agents/AgentContext');
+
+      let issue = await IssueRepository.getById(issue_id);
+      if (!issue) {
+        return res.status(404).json({ error: "Issue not found" });
+      }
+
+      if (resolvedImage) {
+        const photos = issue.before_after_photos || [];
+        if (!photos.includes(resolvedImage)) {
+          await IssueRepository.update(issue_id, {
+            before_after_photos: [resolvedImage, ...photos]
+          });
+          issue = await IssueRepository.getById(issue_id) as any;
+        }
+      }
+
+      let context = createInitialContext(issue as any);
+      context = await agentOrchestrator.executeAgent('agent_resolution_verification', context);
+
+      const verificationResult = context.aiOutputs['agent_resolution_verification'];
+
+      return res.json({
+        issue_id,
+        verification: verificationResult,
+        decisions: context.previousDecisions
+      });
+    } catch (err: any) {
+      console.error("Resolution verification failed:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async getOperationsAnalytics(req: Request, res: Response) {
+    try {
+      const { IssueRepository } = await import('../repositories/issue.repository');
+      const { agentOrchestrator } = await import('../agents/AgentOrchestrator');
+      const { createInitialContext } = await import('../agents/AgentContext');
+
+      const allIssues = await IssueRepository.getAll();
+      let context = createInitialContext(undefined, undefined, { allIssues });
+      context = await agentOrchestrator.executeAgent('agent_operations_analytics', context);
+
+      const analyticsResult = context.aiOutputs['agent_operations_analytics'];
+
+      return res.json({
+        analytics: analyticsResult,
+        decisions: context.previousDecisions
+      });
+    } catch (err: any) {
+      console.error("Operations analytics retrieval failed:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
 }

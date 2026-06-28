@@ -1877,7 +1877,7 @@ export default function Report() {
                 rightActiveTab === 'copilot' ? 'bg-white text-navy shadow-sm' : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              <Bot className="w-4 h-4" />
+              <Sparkles className="w-4 h-4" />
               AI Citizen Copilot
               <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-slate-100 animate-ping" />
               <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-slate-100" />
@@ -1955,7 +1955,7 @@ export default function Report() {
               <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-3">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Bot className="w-5 h-5 text-navy animate-bounce" />
+                    <Sparkles className="w-5 h-5 text-navy animate-bounce" />
                     AI Citizen Copilot
                   </h3>
                   <div className="flex items-center gap-1 mt-0.5">

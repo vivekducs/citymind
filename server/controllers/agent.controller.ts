@@ -138,4 +138,74 @@ export class AgentController {
       return res.status(500).json({ error: err.message });
     }
   }
+
+  static async getTwinData(req: Request, res: Response) {
+    try {
+      const health = await AgentService.handleCityHealth();
+      const maintenance = await AgentService.handlePredictiveMaintenance();
+      const emergency = await AgentService.handleEmergencyResponse();
+      return res.json({ health, maintenance, emergency });
+    } catch (err: any) {
+      console.error("Failed to fetch twin data:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async getBudgetOptimization(req: Request, res: Response) {
+    try {
+      const budget = await AgentService.handleBudgetOptimization();
+      return res.json(budget);
+    } catch (err: any) {
+      console.error("Failed to fetch budget optimization:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async simulateDecision(req: Request, res: Response) {
+    try {
+      const { question } = req.body;
+      if (!question) {
+        return res.status(400).json({ error: "question parameter is required" });
+      }
+      const simulation = await AgentService.handleDecisionSimulation(question);
+      return res.json(simulation);
+    } catch (err: any) {
+      console.error("Failed to simulate decision:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async getExecutiveBriefing(req: Request, res: Response) {
+    try {
+      const briefing = await AgentService.handleExecutiveBriefing();
+      return res.json(briefing);
+    } catch (err: any) {
+      console.error("Failed to fetch executive briefing:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async searchSemantic(req: Request, res: Response) {
+    try {
+      const { query: queryStr } = req.body;
+      if (!queryStr) {
+        return res.status(400).json({ error: "query parameter is required" });
+      }
+      const results = await AgentService.handleSemanticSearch(queryStr);
+      return res.json(results);
+    } catch (err: any) {
+      console.error("Failed semantic search:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async getCommunityInsights(req: Request, res: Response) {
+    try {
+      const insights = await AgentService.handleCommunityInsights();
+      return res.json(insights);
+    } catch (err: any) {
+      console.error("Failed community insights:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
 }

@@ -46,4 +46,84 @@ export class AgentService {
     const finalContext = await agentOrchestrator.executeAgent('agent_insights', context);
     return finalContext.aiOutputs.insights || [];
   }
+
+  /**
+   * PredictiveMaintenanceAgent: Predicts public infrastructure failures
+   */
+  static async handlePredictiveMaintenance(): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues });
+    const finalContext = await agentOrchestrator.executeAgent('agent_predictive_maintenance', context);
+    return finalContext.aiOutputs.agent_predictive_maintenance;
+  }
+
+  /**
+   * BudgetOptimizationAgent: Fiscal allocation optimizer
+   */
+  static async handleBudgetOptimization(): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues });
+    const finalContext = await agentOrchestrator.executeAgent('agent_budget_optimization', context);
+    return finalContext.aiOutputs.agent_budget_optimization;
+  }
+
+  /**
+   * EmergencyResponseAgent: Critical safety monitor
+   */
+  static async handleEmergencyResponse(): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues });
+    const finalContext = await agentOrchestrator.executeAgent('agent_emergency_response', context);
+    return finalContext.aiOutputs.agent_emergency_response;
+  }
+
+  /**
+   * CityHealthAgent: Computes City Health Index
+   */
+  static async handleCityHealth(): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues });
+    const finalContext = await agentOrchestrator.executeAgent('agent_city_health', context);
+    return finalContext.aiOutputs.agent_city_health;
+  }
+
+  /**
+   * DecisionSimulationAgent: Simulates What-If municipal choices
+   */
+  static async handleDecisionSimulation(question: string): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues, question });
+    const finalContext = await agentOrchestrator.executeAgent('agent_decision_simulation', context);
+    return finalContext.aiOutputs.agent_decision_simulation;
+  }
+
+  /**
+   * ExecutiveBriefingAgent: Generates leadership daily bulletin
+   */
+  static async handleExecutiveBriefing(): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues });
+    const finalContext = await agentOrchestrator.executeAgent('agent_executive_briefing', context);
+    return finalContext.aiOutputs.agent_executive_briefing;
+  }
+
+  /**
+   * SemanticSearchAgent: Advanced concepts database query mapping
+   */
+  static async handleSemanticSearch(queryStr: string): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues, query: queryStr });
+    const finalContext = await agentOrchestrator.executeAgent('agent_semantic_search', context);
+    return finalContext.aiOutputs.agent_semantic_search;
+  }
+
+  /**
+   * CommunityInsightsAgent: Neighborhood volunteer and awareness mapper
+   */
+  static async handleCommunityInsights(): Promise<any> {
+    const allIssues = await IssueRepository.getAll();
+    const context = createInitialContext(undefined, undefined, { allIssues });
+    const finalContext = await agentOrchestrator.executeAgent('agent_community_insights', context);
+    return finalContext.aiOutputs.agent_community_insights;
+  }
 }
