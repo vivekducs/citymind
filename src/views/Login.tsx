@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { AlertTriangle, Mail, Lock, Loader2, ArrowRight, Shield, Users, Sparkles, Check } from 'lucide-react';
+import { AlertTriangle, Mail, Lock, Loader2, ArrowRight, Shield, Users, Sparkles, ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getFriendlyErrorMessage } from '../utils/errors';
 
@@ -13,9 +13,8 @@ export default function Login() {
   const [activeTab, setActiveTab] = useState<'citizen' | 'authority'>('citizen');
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [autofilled, setAutofilled] = useState(false);
 
-  const { register, handleSubmit, setValue, formState: { errors } } = useForm({
+  const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: {
       email: '',
       password: ''
@@ -39,24 +38,29 @@ export default function Login() {
     }
   };
 
-  const handleAutofill = () => {
-    setValue('email', 'admin@citymind.gov');
-    setValue('password', 'AdminPassword2026');
-    setAutofilled(true);
-    setTimeout(() => setAutofilled(false), 2000);
-  };
-
   return (
-    <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center p-4 bg-gradient-to-tr from-saffron/5 via-white to-slate-50/30" id="login-view">
+    <div className="min-h-[calc(100vh-12rem)] flex flex-col items-center justify-center p-4 bg-slate-50" id="login-view">
+      {/* Top Header Navigation for easy escape */}
+      <div className="w-full max-w-md flex justify-start mb-4">
+        <Link 
+          to="/" 
+          className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-navy transition-colors duration-150"
+          id="btn-back-to-home"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Home Page
+        </Link>
+      </div>
+
       <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="w-full max-w-md bg-white p-8 rounded-2xl border border-slate-100 shadow-xl space-y-6"
+        className="w-full max-w-md bg-white p-8 rounded-2xl border border-slate-200/80 shadow-md space-y-6"
       >
         {/* Title */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-navy text-white shadow-lg shadow-navy/10 mb-2">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#003366] text-white shadow-lg shadow-navy/10 mb-2">
             <AlertTriangle className="w-6 h-6 animate-pulse" />
           </div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">CityMind Hub</h2>
@@ -73,7 +77,7 @@ export default function Login() {
             }}
             className={`flex-1 py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all duration-150 ${
               activeTab === 'citizen'
-                ? 'bg-white text-navy shadow-sm'
+                ? 'bg-white text-[#003366] shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -88,7 +92,7 @@ export default function Login() {
             }}
             className={`flex-1 py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all duration-150 ${
               activeTab === 'authority'
-                ? 'bg-white text-navy shadow-sm'
+                ? 'bg-white text-[#003366] shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -148,27 +152,8 @@ export default function Login() {
             </button>
           </div>
         ) : (
-          /* Authority View (Email/Password with Seed) */
+          /* Authority View (Email/Password) */
           <div className="space-y-4" id="authority-access-panel">
-            {/* Seeds Callout */}
-            <div className="p-3.5 bg-navy/5 border border-navy/10 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-navy uppercase tracking-wider">Seeded Authority Access</span>
-                <button
-                  type="button"
-                  onClick={handleAutofill}
-                  className="px-2 py-0.5 text-[10px] font-semibold bg-navy text-white hover:bg-navy-hover rounded transition-colors flex items-center gap-1 shrink-0"
-                >
-                  {autofilled ? <Check className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
-                  {autofilled ? 'Autofilled' : 'Use Credentials'}
-                </button>
-              </div>
-              <div className="text-xs text-slate-600 space-y-1">
-                <div><span className="font-semibold text-slate-700">Official ID:</span> admin@citymind.gov</div>
-                <div><span className="font-semibold text-slate-700">Access Key:</span> AdminPassword2026</div>
-              </div>
-            </div>
-
             {/* Form */}
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" id="login-form">
               <div className="space-y-1">

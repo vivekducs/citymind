@@ -6,7 +6,9 @@ import {
   onAuthStateChanged,
   User as FirebaseUser,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
@@ -121,6 +123,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, [setUser, setLoading]);
 
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result && result.user) {
+          const firebaseUser = result.user;
+          const userDocRef = doc(db, 'users', firebaseUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+
+          let profile: UserProfile;
+          if (userDocSnap.exists()) {
+            profile = userDocSnap.data() as UserProfile;
+          } else {
+            profile = {
+              user_id: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+              credibility_score: 100,
+              total_issues_reported: 0,
+              badges_earned: [],
+              is_authority: firebaseUser.email === 'vip901it@gmail.com' || firebaseUser.email?.endsWith('.gov') || false,
+              created_at: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), profile);
+          }
+
+          localStorage.setItem(`user_profile_${firebaseUser.uid}`, JSON.stringify(profile));
+          setUserState(profile);
+          setUser(profile);
+        }
+      } catch (err: any) {
+        console.error("Error with redirect result:", err);
+      }
+    };
+
+    handleRedirectResult();
+  }, [setUser]);
+
   const signup = async (email: string, password: string, name: string): Promise<UserProfile> => {
     setLoadingState(true);
     setLoading(true);
@@ -232,7 +272,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setErrorState(null);
     try {
       const provider = new GoogleAuthProvider();
-      const userCredential = await signInWithPopup(auth, provider);
+      let userCredential;
+      try {
+        userCredential = await signInWithPopup(auth, provider);
+      } catch (popupErr: any) {
+        console.warn("Popup sign-in failed or blocked. Falling back to redirect...", popupErr);
+        if (
+          popupErr.code === 'auth/popup-closed-by-user' ||
+          popupErr.code === 'auth/popup-blocked' ||
+          popupErr.code === 'auth/cancelled-popup-request' ||
+          popupErr.code === 'auth/operation-not-allowed' ||
+          popupErr.message?.includes('closed') ||
+          popupErr.message?.includes('popup')
+        ) {
+          await signInWithRedirect(auth, provider);
+          return new Promise(() => {});
+        }
+        throw popupErr;
+      }
       const firebaseUser = userCredential.user;
 
       const userDocRef = doc(db, 'users', firebaseUser.uid);
