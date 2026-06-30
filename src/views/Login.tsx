@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -7,7 +7,7 @@ import { motion } from 'motion/react';
 import { getFriendlyErrorMessage } from '../utils/errors';
 
 export default function Login() {
-  const { login, loginWithGoogle } = useAuth();
+  const { login, loginWithGoogle, error: authError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<'citizen' | 'authority'>('citizen');
@@ -23,6 +23,12 @@ export default function Login() {
 
   // Determine redirect path
   const from = location.state?.from?.pathname || '/';
+
+  useEffect(() => {
+    if (authError) {
+      setServerError(getFriendlyErrorMessage(authError));
+    }
+  }, [authError]);
 
   const onSubmit = async (data: any) => {
     setSubmitting(true);
@@ -102,9 +108,33 @@ export default function Login() {
         </div>
 
         {serverError && (
-          <div className="p-4 bg-red-50 border border-red-100 text-red-700 text-xs rounded-xl flex items-start gap-2" id="login-server-error">
-            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-            <span>{serverError}</span>
+          <div className="space-y-4" id="login-error-container">
+            <div className="p-4 bg-red-50 border border-red-100 text-red-700 text-xs rounded-xl flex items-start gap-2" id="login-server-error">
+              <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{serverError}</span>
+            </div>
+
+            {serverError.includes('not authorized for Google Sign-In') && (
+              <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl space-y-3" id="firebase-auth-domain-setup-guide">
+                <div className="flex items-center gap-2 text-amber-800 font-semibold text-xs uppercase tracking-wider">
+                  <Shield className="w-4 h-4" />
+                  Firebase Quick Setup Guide
+                </div>
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  To log in with Google on this production domain, you must authorize it in your Firebase project settings:
+                </p>
+                <ol className="list-decimal list-inside text-xs text-amber-800 space-y-1.5 pl-1">
+                  <li>Go to the <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="underline font-bold hover:text-amber-900">Firebase Console</a>.</li>
+                  <li>Open your project: <code className="bg-amber-100/80 px-1 py-0.5 rounded font-mono text-[11px]">tranquil-atom-8gbcx</code>.</li>
+                  <li>Click on <strong className="font-semibold">Authentication</strong> (left sidebar) &rarr; <strong className="font-semibold">Settings</strong> tab.</li>
+                  <li>Under <strong className="font-semibold">Authorized domains</strong>, click <strong className="font-semibold">Add domain</strong>.</li>
+                  <li>Enter <code className="bg-amber-100/80 px-1 py-0.5 rounded font-mono text-[11px]">{typeof window !== 'undefined' ? window.location.hostname : 'citymind-450881698464.us-west1.run.app'}</code> and click <strong className="font-semibold">Add</strong>.</li>
+                </ol>
+                <div className="pt-1 text-[11px] text-amber-600 italic">
+                  Once added, sign-in will work immediately without redeploying the app!
+                </div>
+              </div>
+            )}
           </div>
         )}
 

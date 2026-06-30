@@ -155,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch (err: any) {
         console.error("Error with redirect result:", err);
+        setErrorState(err.code || err.message || "Failed to process redirect login.");
       }
     };
 
@@ -276,15 +277,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         userCredential = await signInWithPopup(auth, provider);
       } catch (popupErr: any) {
-        console.warn("Popup sign-in failed or blocked. Falling back to redirect...", popupErr);
+        console.warn("Popup sign-in failed or blocked.", popupErr);
+        // Only automatically fall back to redirect if the popup was actually blocked by the browser.
+        // If the user closed the popup voluntarily, do NOT force redirect them, as that traps them in a loop.
         if (
-          popupErr.code === 'auth/popup-closed-by-user' ||
           popupErr.code === 'auth/popup-blocked' ||
-          popupErr.code === 'auth/cancelled-popup-request' ||
           popupErr.code === 'auth/operation-not-allowed' ||
-          popupErr.message?.includes('closed') ||
+          popupErr.message?.includes('blocked') ||
           popupErr.message?.includes('popup')
         ) {
+          console.log("Popup blocked. Falling back to signInWithRedirect...");
           await signInWithRedirect(auth, provider);
           return new Promise(() => {});
         }

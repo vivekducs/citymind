@@ -42,6 +42,10 @@ export function getFriendlyErrorMessage(err: any): string {
 
   // Firebase Authentication & Authorization errors with embedded raw messages
   if (code && typeof code === 'string') {
+    if (code.includes('auth/unauthorized-domain') || code.includes('auth/unauthorized-client')) {
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : 'your deployed URL';
+      return `This domain (${hostname}) is not authorized for Google Sign-In in your Firebase Console. Please log into the Firebase Console, navigate to Authentication > Settings > Authorized Domains, and add "${hostname}" to allow sign-ins from this URL.`;
+    }
     if (code.includes('auth/invalid-credential') || code.includes('auth/wrong-password') || code.includes('auth/user-not-found')) {
       return `Invalid email address or password.${technicalDetail ? ' Details:' + technicalDetail : ''}`;
     }
