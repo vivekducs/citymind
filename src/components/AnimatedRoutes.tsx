@@ -7,7 +7,6 @@ import AnimatedPage from './AnimatedPage';
 // Views
 import Home from '../views/Home';
 import Login from '../views/Login';
-import Signup from '../views/Signup';
 import Report from '../views/Report';
 import Issues from '../views/Issues';
 import IssueDetail from '../views/IssueDetail';
@@ -28,7 +27,7 @@ export default function AnimatedRoutes() {
         <Routes location={location}>
           {/* Public authentication paths */}
           <Route path="/login" element={<AnimatedPage><Login /></AnimatedPage>} />
-        <Route path="/signup" element={<AnimatedPage><Signup /></AnimatedPage>} />
+          <Route path="/signup" element={<AnimatedPage><Login /></AnimatedPage>} />
 
         {/* Core App Layout Paths */}
         <Route 

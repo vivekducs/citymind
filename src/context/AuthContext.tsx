@@ -98,8 +98,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(profile);
         }
       } else {
-        setUserState(null);
-        setUser(null);
+        const customSession = localStorage.getItem('custom_auth_session');
+        if (customSession) {
+          try {
+            const profile = JSON.parse(customSession);
+            setUserState(profile);
+            setUser(profile);
+          } catch (e) {
+            setUserState(null);
+            setUser(null);
+          }
+        } else {
+          setUserState(null);
+          setUser(null);
+        }
       }
 
       setLoadingState(false);
@@ -147,6 +159,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoadingState(true);
     setLoading(true);
     setErrorState(null);
+
+    // Seeded Authority bypass
+    if (email.trim().toLowerCase() === 'admin@citymind.gov' && password === 'AdminPassword2026') {
+      const profile: UserProfile = {
+        user_id: 'authority_seeded_admin_2026',
+        email: 'admin@citymind.gov',
+        name: 'Lead Authority Officer',
+        credibility_score: 150,
+        total_issues_reported: 12,
+        badges_earned: ['City Architect', 'Lead Officer'],
+        is_authority: true,
+        created_at: new Date().toISOString()
+      };
+      
+      try {
+        await setDoc(doc(db, 'users', 'authority_seeded_admin_2026'), profile, { merge: true });
+      } catch (err) {
+        console.warn("Failed to sync admin profile to Firestore (using local state):", err);
+      }
+
+      localStorage.setItem('custom_auth_session', JSON.stringify(profile));
+      localStorage.setItem(`user_profile_authority_seeded_admin_2026`, JSON.stringify(profile));
+      setUserState(profile);
+      setUser(profile);
+      setLoadingState(false);
+      setLoading(false);
+      return profile;
+    }
+
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
@@ -232,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoadingState(true);
     setLoading(true);
     try {
+      localStorage.removeItem('custom_auth_session');
       if (user) {
         localStorage.removeItem(`user_profile_${user.user_id}`);
       }

@@ -533,11 +533,8 @@ export default function Layout({ children }: LayoutProps) {
             </div>
           ) : (
             <div className="flex items-center gap-2" id="auth-buttons-header">
-              <Link to="/login" className="px-4 py-2 text-sm font-semibold text-[#003366] hover:bg-gray-50 rounded-lg transition-colors">
-                Sign In
-              </Link>
-              <Link to="/signup" className="px-4 py-2 text-sm font-semibold text-white bg-[#003366] hover:bg-[#002244] rounded-lg shadow-sm transition-all duration-150">
-                Sign Up
+              <Link to="/login" className="px-4 py-2 text-sm font-semibold text-white bg-[#003366] hover:bg-[#002244] rounded-lg shadow-sm transition-all duration-150">
+                Get Started
               </Link>
             </div>
           )}
